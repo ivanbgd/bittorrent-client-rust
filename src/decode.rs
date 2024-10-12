@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_bencode;
 use serde_json;
 
+/// https://wiki.theory.org/BitTorrentSpecification#Bencoding
 pub fn decode_bencoded_value(encoded_value: &[u8]) -> Result<serde_json::Value> {
     fn decode(value: serde_bencode::value::Value) -> Result<serde_json::Value> {
         match value {
