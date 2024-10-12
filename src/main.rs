@@ -6,6 +6,7 @@ use anyhow::Result;
 
 use bittorrent_starter_rust::decode::decode_bencoded_value;
 
+/// Main
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     let command = &args[1];
