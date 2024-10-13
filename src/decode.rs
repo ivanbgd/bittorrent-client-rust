@@ -6,10 +6,10 @@ use serde_json;
 pub fn decode_bencoded_value(encoded_value: &[u8]) -> Result<serde_json::Value> {
     fn decode(value: serde_bencode::value::Value) -> Result<serde_json::Value> {
         match value {
-            serde_bencode::value::Value::Bytes(string) => {
-                let string = String::from_utf8_lossy(string.as_slice());
-                Ok(serde_json::Value::String(string.parse()?))
-            }
+            serde_bencode::value::Value::Bytes(string) => unsafe {
+                let string = String::from_utf8_unchecked(string);
+                Ok(serde_json::Value::String(string))
+            },
             serde_bencode::value::Value::Int(integer) => {
                 let integer = serde_json::Number::from(integer);
                 Ok(serde_json::Value::Number(integer))
@@ -21,14 +21,14 @@ pub fn decode_bencoded_value(encoded_value: &[u8]) -> Result<serde_json::Value> 
                     .collect::<Result<Vec<serde_json::Value>>>()?;
                 Ok(serde_json::Value::Array(array))
             }
-            serde_bencode::value::Value::Dict(dict) => {
+            serde_bencode::value::Value::Dict(dict) => unsafe {
                 let mut object: serde_json::Map<String, serde_json::Value> =
                     serde_json::Map::with_capacity(dict.len());
                 for (k, v) in dict.into_iter() {
-                    object.insert(String::from_utf8_lossy(k.as_slice()).parse()?, decode(v)?);
+                    object.insert(String::from_utf8_unchecked(k), decode(v)?);
                 }
                 Ok(serde_json::Value::Object(object))
-            }
+            },
         }
     }
 

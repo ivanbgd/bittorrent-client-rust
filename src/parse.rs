@@ -40,8 +40,9 @@ pub struct Info {
     /// pieces: string consisting of the concatenation of all 20-byte SHA1 hash values,
     /// one per piece (byte string, i.e. not urlencoded)
     pieces: String,
-    // /// Single-file or multiple-file torrent
-    // mode: Mode,
+
+    /// Single-file or multiple-file torrent
+    mode: Mode,
 }
 
 /// Single-file or multiple-file torrent
@@ -58,9 +59,7 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     let decoded = decode_bencoded_value(contents)?;
 
     let announce = &decoded["announce"].to_string();
-    let announce_len = announce.len();
-    let announce = &announce[1..announce_len - 1];
-    let announce = String::from(announce);
+    let announce = String::from(&announce[1..announce.len() - 1]);
 
     let info = &decoded["info"];
 
@@ -68,17 +67,16 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     let plen = plen.parse::<usize>()?;
 
     let pieces = calc_sha1(info)?;
-    let pieces = String::from(&pieces[1..pieces.len() - 1]);
 
     // TODO
-    let _mode = Mode::SingleFile {
+    let mode = Mode::SingleFile {
         name: String::new(),
         length: 0,
     };
 
     Ok(MetaInfo {
         announce,
-        info: Info { plen, pieces },
+        info: Info { plen, pieces, mode },
     })
 }
 
@@ -91,9 +89,6 @@ impl Display for MetaInfo {
         )
     }
 }
-
-// d69f91e6b2ae4c542468d1073a71d4ea13879a7f
-// d456af18f58438b96cc1ff7f636f08fd752b2a
 
 #[cfg(test)]
 mod tests {
