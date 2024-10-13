@@ -32,6 +32,7 @@ pub struct MetaInfo {
 /// We use the single-file variant.
 ///
 /// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Info {
     /// piece length: number of bytes in each piece (integer)
@@ -95,11 +96,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_info() {
+    fn info_sample() {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
             Length: 92063\nInfo Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f\n",
             format!("{}", meta_info(&PathBuf::from("sample.torrent")).unwrap())
+        );
+    }
+
+    #[test]
+    fn info_codercat() {
+        assert_eq!(
+            "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
+            Length: 2994120\nInfo Hash: c77829d2a77d6516f88cd7a3de1a26abcbfab0db\n",
+            format!(
+                "{}",
+                meta_info(&PathBuf::from("test_samples/codercat.gif.torrent")).unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn info_congratulations() {
+        assert_eq!(
+            "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
+            Length: 820892\nInfo Hash: 1cad4a486798d952614c394eb15e75bec587fd08\n",
+            format!(
+                "{}",
+                meta_info(&PathBuf::from("test_samples/congratulations.gif.torrent")).unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn info_itsworking() {
+        assert_eq!(
+            "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
+            Length: 2549700\nInfo Hash: 70edcac2611a8829ebf467a6849f5d8408d9d8f4\n",
+            format!(
+                "{}",
+                meta_info(&PathBuf::from("test_samples/itsworking.gif.torrent")).unwrap()
+            )
         );
     }
 }
