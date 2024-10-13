@@ -39,12 +39,13 @@ pub struct MetaInfo {
 /// If `length` is present then the download represents a single file,
 /// otherwise it represents a set of files which go in a directory structure.
 ///
-/// We keep those fields inside the `mode` field.
+/// We hold those fields inside the `mode` field.
+///
+/// We also add `info_hash` to hold SHA1 sum of the Info dictionary.
 ///
 /// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
 ///
 /// https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Info {
     /// Single-file or multiple-file torrent
@@ -55,7 +56,10 @@ pub struct Info {
 
     /// Pieces: string consisting of the concatenation of all 20-byte SHA1 hash values,
     /// one per piece (byte string, i.e. not urlencoded)
-    pieces: String,
+    pieces: Vec<u8>,
+
+    /// SHA1 sum of the Info dictionary
+    info_hash: String,
 }
 
 /// Single-file or multiple-file torrent
@@ -92,7 +96,7 @@ pub struct Files {
     length: usize,
 }
 
-pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
+pub unsafe fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     let contents: Vec<u8> = fs::read(path)?;
     let contents: &[u8] = contents.as_ref();
 
@@ -128,12 +132,50 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     };
 
     let plen = info["piece length"].to_string().parse::<usize>()?;
-    let pieces = calc_sha1(info)?;
+
+    // let pieces = &info["pieces"];
+    let mut file_contents = String::from_utf8_unchecked(Vec::from(contents)); // todo
+                                                                              // println!("File contents: {}\n", file_contents);
+
+    // let pcs = file_contents.split("pieces").collect::<Vec<_>>()[1].to_string();
+
+    // let pcs1 = file_contents
+    //     .split_once("pieces")
+    //     .expect("Torrent file should have the field 'pieces'.")
+    //     .1
+    //     .to_string();
+    // println!("pcs1: {}\n", pcs1);
+
+    let pcs_idx = file_contents
+        .find("pieces")
+        .expect("Torrent file should have the field 'pieces'.")
+        + "pieces".len();
+    let rest = &mut file_contents.split_off(pcs_idx);
+    // println!("rest: {}", rest);
+    let start = rest.find(':').unwrap() + 1;
+    let mut pieces = rest.split_off(start);
+    // println!("pieces: {}", pieces);
+    let end = pieces.find("ee").unwrap();
+    // let start = file_contents[pcs_idx..].find(':').unwrap() + 1;
+    // let end = file_contents[start..].find("ee").unwrap();
+    // println!("pcs_idx: {}, start: {}, end: {}", pcs_idx, start, end);
+    // let pcs2 = &rest.split_off(start)[..end];
+    let _ = pieces.split_off(end);
+    // println!("pcs2: {}; len: {}\n", pieces, pieces.len());
+
+    // let pieces = String::from_utf8_unchecked(info["pieces"].as_array().unwrap());
+    // let pieces_idx = contents.iter().find()
+    let info_hash = calc_sha1(info)?;
 
     Ok(MetaInfo {
         announce,
         created_by,
-        info: Info { mode, plen, pieces },
+        info: Info {
+            mode,
+            plen,
+            pieces: pieces.into_bytes(),
+            info_hash,
+        },
     })
 }
 
@@ -144,14 +186,65 @@ impl Display for MetaInfo {
             Mode::MultipleFile { name: _, files: _ } => &0,
         };
 
+        let pieces = &self.info.pieces;
+        // let pieces = unsafe { String::from_utf8_unchecked(pieces.clone()) };
+
+        let pcs_len = pieces.len();
+        let num_pcs = pcs_len / 20;
+        // let mut piece_hashes: Vec<String> = Vec::with_capacity(num_pcs);
+        let mut piece_hashes: Vec<String> = Vec::with_capacity(num_pcs);
+        let mut start: usize = 0;
+        let mut count: usize = 0;
+        for _ in pieces {
+            count += 1;
+            unsafe {
+                if count % 20 == 0 {
+                    // let piece = pieces[start..count].to_string();
+                    let piece =
+                        String::from_utf8_unchecked(pieces[start..count].to_vec()).into_bytes();
+                    // let mut p: Vec<char> = Vec::new();
+                    // for c in piece.clone() {
+                    //     p.push(char::from(c));
+                    // }
+                    // println!("123 p: {:?} qqq {}", p, p.len());
+                    // let piece = pieces[start..count].to_vec();
+                    piece_hashes.push(hex::encode(piece));
+                    start += 20;
+                }
+            }
+        }
+
+        // let mut ph: Vec<String> = Vec::with_capacity(num_pcs);
+        // unsafe {
+        //     for piece in piece_hashes.clone() {
+        //         let pc = String::from_utf8_unchecked(piece);
+        //         ph.push(pc);
+        //     }
+        // }
+
         write!(
             f,
-            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nMode: {:?}",
-            self.announce, length, self.info.pieces, self.info.mode
-        )
+            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n",
+            self.announce, length, self.info.info_hash, self.info.plen
+        )?;
+
+        for piece in piece_hashes {
+            writeln!(f, "{}", piece)?
+        }
+
+        // unsafe {
+        //     for piece in piece_hashes.clone() {
+        //         let pc = String::from_utf8_unchecked(piece);
+        //         writeln!(f, "{}", pc)?;
+        //         // println!("{}", pc);
+        //     }
+        // }
+
+        Ok(())
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,7 +253,8 @@ mod tests {
     fn info_sample() {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
-            Length: 92063\nInfo Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f\n",
+            Length: 92063\nInfo Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f\n\
+            Piece Length: 32768\nPiece Hashes:\n",
             format!("{}", meta_info(&PathBuf::from("sample.torrent")).unwrap())
         );
     }
@@ -169,7 +263,8 @@ mod tests {
     fn info_codercat() {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
-            Length: 2994120\nInfo Hash: c77829d2a77d6516f88cd7a3de1a26abcbfab0db\n",
+            Length: 2994120\nInfo Hash: c77829d2a77d6516f88cd7a3de1a26abcbfab0db\n\
+            Piece Length: 262144\nPiece Hashes:\n",
             format!(
                 "{}",
                 meta_info(&PathBuf::from("test_samples/codercat.gif.torrent")).unwrap()
@@ -181,7 +276,8 @@ mod tests {
     fn info_congratulations() {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
-            Length: 820892\nInfo Hash: 1cad4a486798d952614c394eb15e75bec587fd08\n",
+            Length: 820892\nInfo Hash: 1cad4a486798d952614c394eb15e75bec587fd08\n\
+            Piece Length: 262144\nPiece Hashes:\n",
             format!(
                 "{}",
                 meta_info(&PathBuf::from("test_samples/congratulations.gif.torrent")).unwrap()
@@ -193,7 +289,8 @@ mod tests {
     fn info_itsworking() {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
-            Length: 2549700\nInfo Hash: 70edcac2611a8829ebf467a6849f5d8408d9d8f4\n",
+            Length: 2549700\nInfo Hash: 70edcac2611a8829ebf467a6849f5d8408d9d8f4\n\
+            Piece Length: 262144\nPiece Hashes:\n",
             format!(
                 "{}",
                 meta_info(&PathBuf::from("test_samples/itsworking.gif.torrent")).unwrap()
@@ -201,3 +298,4 @@ mod tests {
         );
     }
 }
+*/

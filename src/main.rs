@@ -17,10 +17,10 @@ fn main() -> Result<()> {
             let decoded_value = decode_bencoded_value(encoded_value.as_bytes())?;
             println!("{}", decoded_value);
         }
-        Commands::Info { path } => {
+        Commands::Info { path } => unsafe {
             let meta = meta_info(path)?;
             println!("{}", meta);
-        }
+        },
     }
 
     Ok(())
