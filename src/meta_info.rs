@@ -99,16 +99,10 @@ impl Display for MetaInfo {
             Mode::MultipleFile { name: _ } => &0,
         };
 
-        // let length = if let Mode::SingleFile { length, name: _ } = self.info.mode {
-        //     length
-        // } else {
-        //     0
-        // };
-
         write!(
             f,
-            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nCreated by: {}",
-            self.announce, length, self.info.pieces, self.created_by
+            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\n",
+            self.announce, length, self.info.pieces
         )
     }
 }
@@ -117,7 +111,6 @@ impl Display for MetaInfo {
 mod tests {
     use super::*;
 
-    #[ignore = "neglects created_by"]
     #[test]
     fn info_sample() {
         assert_eq!(
@@ -127,17 +120,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn info_sample_starts() {
-        assert!(
-            format!("{}", meta_info(&PathBuf::from("sample.torrent")).unwrap()).starts_with(
-                "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
-                     Length: 92063\nInfo Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f\n"
-            )
-        );
-    }
-
-    #[ignore = "neglects created_by"]
     #[test]
     fn info_codercat() {
         assert_eq!(
@@ -150,7 +132,6 @@ mod tests {
         );
     }
 
-    #[ignore = "neglects created_by"]
     #[test]
     fn info_congratulations() {
         assert_eq!(
@@ -163,7 +144,6 @@ mod tests {
         );
     }
 
-    #[ignore = "neglects created_by"]
     #[test]
     fn info_itsworking() {
         assert_eq!(
