@@ -7,7 +7,7 @@ use clap::Parser;
 
 use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::decode::decode_bencoded_value;
-use bittorrent_starter_rust::parse::meta_info;
+use bittorrent_starter_rust::meta_info::meta_info;
 
 fn main() -> Result<()> {
     let args = Args::parse();
