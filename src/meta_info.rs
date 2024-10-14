@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
+use crate::constants::SHA1_LEN;
 use crate::decode::decode_bencoded_value;
 use crate::hash::calc_sha1;
 
@@ -56,7 +57,12 @@ pub struct Info {
 
     /// Pieces: string consisting of the concatenation of all 20-byte SHA1 hash values,
     /// one per piece (byte string, i.e. not urlencoded)
-    pieces: Vec<u8>,
+    ///
+    /// We keep it as a vector of strings, where each element corresponds to one piece.
+    /// So, each element is a 20-byte SHA1 hash sum.
+    /// This is more efficient, because we should parse the torrent file only once,
+    /// and then we can use all these fields multiple times without new calculations.
+    pieces: Vec<String>,
 
     /// SHA1 sum of the Info dictionary
     info_hash: String,
@@ -96,9 +102,9 @@ pub struct Files {
     length: usize,
 }
 
-pub unsafe fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
-    let contents: Vec<u8> = fs::read(path)?;
-    let contents: &[u8] = contents.as_ref();
+pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
+    let contents_vec: Vec<u8> = fs::read(path)?;
+    let contents: &[u8] = contents_vec.as_ref();
 
     let decoded = decode_bencoded_value(contents)?;
 
@@ -133,38 +139,32 @@ pub unsafe fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
 
     let plen = info["piece length"].to_string().parse::<usize>()?;
 
-    // let pieces = &info["pieces"];
-    let mut file_contents = String::from_utf8_unchecked(Vec::from(contents)); // todo
-                                                                              // println!("File contents: {}\n", file_contents);
+    let pieces = &info["pieces"];
+    let serialized = &serde_bencode::to_bytes(pieces)?;
+    let start = serialized
+        .iter()
+        .position(|elt| elt.eq(&b':')) // b':' == 0x3a == 58
+        .expect("expected a ':'")
+        + 1;
+    let pieces_string = serialized[start..].to_vec();
+    let pcs_len = pieces_string.len();
 
-    // let pcs = file_contents.split("pieces").collect::<Vec<_>>()[1].to_string();
+    if pcs_len % SHA1_LEN != 0 {
+        panic!(
+            "Length of 'pieces', {}, is not divisible by SHA1 sum length, which is {}.",
+            pcs_len, SHA1_LEN
+        );
+    }
+    let hex_pieces_string = hex::encode(&pieces_string);
+    let num_pcs = pcs_len / SHA1_LEN;
+    let mut pieces: Vec<String> = Vec::with_capacity(num_pcs);
+    let mut cur = hex_pieces_string;
+    while !cur.is_empty() {
+        let (piece, remainder) = cur.split_at(2 * SHA1_LEN);
+        pieces.push(piece.parse()?);
+        cur = remainder.parse()?;
+    }
 
-    // let pcs1 = file_contents
-    //     .split_once("pieces")
-    //     .expect("Torrent file should have the field 'pieces'.")
-    //     .1
-    //     .to_string();
-    // println!("pcs1: {}\n", pcs1);
-
-    let pcs_idx = file_contents
-        .find("pieces")
-        .expect("Torrent file should have the field 'pieces'.")
-        + "pieces".len();
-    let rest = &mut file_contents.split_off(pcs_idx);
-    // println!("rest: {}", rest);
-    let start = rest.find(':').unwrap() + 1;
-    let mut pieces = rest.split_off(start);
-    // println!("pieces: {}", pieces);
-    let end = pieces.find("ee").unwrap();
-    // let start = file_contents[pcs_idx..].find(':').unwrap() + 1;
-    // let end = file_contents[start..].find("ee").unwrap();
-    // println!("pcs_idx: {}, start: {}, end: {}", pcs_idx, start, end);
-    // let pcs2 = &rest.split_off(start)[..end];
-    let _ = pieces.split_off(end);
-    // println!("pcs2: {}; len: {}\n", pieces, pieces.len());
-
-    // let pieces = String::from_utf8_unchecked(info["pieces"].as_array().unwrap());
-    // let pieces_idx = contents.iter().find()
     let info_hash = calc_sha1(info)?;
 
     Ok(MetaInfo {
@@ -173,7 +173,7 @@ pub unsafe fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
         info: Info {
             mode,
             plen,
-            pieces: pieces.into_bytes(),
+            pieces,
             info_hash,
         },
     })
@@ -187,64 +187,21 @@ impl Display for MetaInfo {
         };
 
         let pieces = &self.info.pieces;
-        // let pieces = unsafe { String::from_utf8_unchecked(pieces.clone()) };
-
-        let pcs_len = pieces.len();
-        let num_pcs = pcs_len / 20;
-        // let mut piece_hashes: Vec<String> = Vec::with_capacity(num_pcs);
-        let mut piece_hashes: Vec<String> = Vec::with_capacity(num_pcs);
-        let mut start: usize = 0;
-        let mut count: usize = 0;
-        for _ in pieces {
-            count += 1;
-            unsafe {
-                if count % 20 == 0 {
-                    // let piece = pieces[start..count].to_string();
-                    let piece =
-                        String::from_utf8_unchecked(pieces[start..count].to_vec()).into_bytes();
-                    // let mut p: Vec<char> = Vec::new();
-                    // for c in piece.clone() {
-                    //     p.push(char::from(c));
-                    // }
-                    // println!("123 p: {:?} qqq {}", p, p.len());
-                    // let piece = pieces[start..count].to_vec();
-                    piece_hashes.push(hex::encode(piece));
-                    start += 20;
-                }
-            }
+        let hashes_len = pieces.len() * 2 * SHA1_LEN + pieces.len();
+        let mut piece_hashes: String = String::with_capacity(hashes_len);
+        for piece in pieces {
+            piece_hashes += piece;
+            piece_hashes += "\n";
         }
-
-        // let mut ph: Vec<String> = Vec::with_capacity(num_pcs);
-        // unsafe {
-        //     for piece in piece_hashes.clone() {
-        //         let pc = String::from_utf8_unchecked(piece);
-        //         ph.push(pc);
-        //     }
-        // }
 
         write!(
             f,
-            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n",
-            self.announce, length, self.info.info_hash, self.info.plen
-        )?;
-
-        for piece in piece_hashes {
-            writeln!(f, "{}", piece)?
-        }
-
-        // unsafe {
-        //     for piece in piece_hashes.clone() {
-        //         let pc = String::from_utf8_unchecked(piece);
-        //         writeln!(f, "{}", pc)?;
-        //         // println!("{}", pc);
-        //     }
-        // }
-
-        Ok(())
+            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}",
+            self.announce, length, self.info.info_hash, self.info.plen, piece_hashes
+        )
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,7 +211,10 @@ mod tests {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
             Length: 92063\nInfo Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f\n\
-            Piece Length: 32768\nPiece Hashes:\n",
+            Piece Length: 32768\nPiece Hashes:\n\
+            e876f67a2a8886e8f36b136726c30fa29703022d\n\
+            6e2275e604a0766656736e81ff10b55204ad8d35\n\
+            f00d937a0213df1982bc8d097227ad9e909acc17\n",
             format!("{}", meta_info(&PathBuf::from("sample.torrent")).unwrap())
         );
     }
@@ -264,7 +224,19 @@ mod tests {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
             Length: 2994120\nInfo Hash: c77829d2a77d6516f88cd7a3de1a26abcbfab0db\n\
-            Piece Length: 262144\nPiece Hashes:\n",
+            Piece Length: 262144\nPiece Hashes:\n\
+            3c34309faebf01e49c0f63c90b7edcc2259b6ad0\n\
+            b8519b2ea9bb373ff567f644428156c98a1d00fc\n\
+            9dc81366587536f48c2098a1d79692f2590fd9a6\n\
+            033c61e717f8c0d1e55850680eb451e3543b6203\n\
+            6f54e746ec369f65f32d45f77b1f1c37621fb965\n\
+            c656704b78107ed553bd0813f92fef780267c07b\n\
+            7431b8683137d20ff594b1f1bf3f8835165d68fb\n\
+            0432bd8e779608d27782b779c7738062e9b50ab5\n\
+            d6bc0409a0f3a9503857669d47fe752d4577ea00\n\
+            a86ee6abbc30cddb800a0b62d7a296111166d839\n\
+            783f52b70f0c902d56196bd3ee7f379b5db57e3b\n\
+            3d8db9e34db63b4ba1be27930911aa37b3f997dd\n",
             format!(
                 "{}",
                 meta_info(&PathBuf::from("test_samples/codercat.gif.torrent")).unwrap()
@@ -277,7 +249,11 @@ mod tests {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
             Length: 820892\nInfo Hash: 1cad4a486798d952614c394eb15e75bec587fd08\n\
-            Piece Length: 262144\nPiece Hashes:\n",
+            Piece Length: 262144\nPiece Hashes:\n\
+            3d42a20edb1cf840cd3528d3a9e921db6338a463\n\
+            69f885b3988a52ffb03591985402b6d5285940ab\n\
+            76869e6c9c1f101f94f39de153e468be6a638f4f\n\
+            bded68d02de011a2b687f75b5833f46cce8e3e9c\n",
             format!(
                 "{}",
                 meta_info(&PathBuf::from("test_samples/congratulations.gif.torrent")).unwrap()
@@ -290,7 +266,17 @@ mod tests {
         assert_eq!(
             "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
             Length: 2549700\nInfo Hash: 70edcac2611a8829ebf467a6849f5d8408d9d8f4\n\
-            Piece Length: 262144\nPiece Hashes:\n",
+            Piece Length: 262144\nPiece Hashes:\n\
+            01cc17bbe60fa5a52f64bd5f5b64d99286d50aa5\n\
+            838f703cf7f6f08d1c497ed390df78f90d5f7566\n\
+            45bf10974b5816491e30628b78a382ca36c4e05f\n\
+            84be4bd855b34bcedc0c6e98f66d3e7c63353d1e\n\
+            86427ac94d6e4f21a6d0d6c8b7ffa4c393c3b131\n\
+            7c70cd5f44d1ac5505cb855d526ceb0f5f1cd5e3\n\
+            3796ab05af1fa874173a0a6c1298625ad47b4fe6\n\
+            272a8ff8fc865b053d974a78681414b38077d7b1\n\
+            b07128d3a6018062bfe779db96d3a93c05fb81d4\n\
+            7affc94f0985b985eb888a36ec92652821a21be4\n",
             format!(
                 "{}",
                 meta_info(&PathBuf::from("test_samples/itsworking.gif.torrent")).unwrap()
@@ -298,4 +284,3 @@ mod tests {
         );
     }
 }
-*/

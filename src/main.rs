@@ -1,6 +1,6 @@
 //! Usage:
 //! - `./your_bittorrent.sh decode <encoded_value>`
-//! - `./your_bittorrent.sh info sample.torrent`
+//! - `./your_bittorrent.sh info <path_to_torrent_file>`
 
 use anyhow::Result;
 use clap::Parser;
@@ -17,10 +17,10 @@ fn main() -> Result<()> {
             let decoded_value = decode_bencoded_value(encoded_value.as_bytes())?;
             println!("{}", decoded_value);
         }
-        Commands::Info { path } => unsafe {
+        Commands::Info { path } => {
             let meta = meta_info(path)?;
             println!("{}", meta);
-        },
+        }
     }
 
     Ok(())
