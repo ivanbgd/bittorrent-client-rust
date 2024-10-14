@@ -148,21 +148,20 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
         + 1;
     let pieces_string = serialized[start..].to_vec();
     let pcs_len = pieces_string.len();
-
     if pcs_len % SHA1_LEN != 0 {
         panic!(
             "Length of 'pieces', {}, is not divisible by SHA1 sum length, which is {}.",
             pcs_len, SHA1_LEN
         );
     }
-    let hex_pieces_string = hex::encode(&pieces_string);
+    let hex_pieces_string = hex::encode(pieces_string);
     let num_pcs = pcs_len / SHA1_LEN;
     let mut pieces: Vec<String> = Vec::with_capacity(num_pcs);
-    let mut cur = hex_pieces_string;
+    let mut cur = hex_pieces_string.as_str();
     while !cur.is_empty() {
         let (piece, remainder) = cur.split_at(2 * SHA1_LEN);
         pieces.push(piece.parse()?);
-        cur = remainder.parse()?;
+        cur = remainder;
     }
 
     let info_hash = calc_sha1(info)?;
