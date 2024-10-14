@@ -3,38 +3,40 @@ use serde_bencode;
 use serde_json;
 
 /// https://wiki.theory.org/BitTorrentSpecification#Bencoding
+///
+/// https://www.bittorrent.org/beps/bep_0003.html#bencoding
 pub fn decode_bencoded_value(encoded_value: &[u8]) -> Result<serde_json::Value> {
-    fn decode(value: serde_bencode::value::Value) -> Result<serde_json::Value> {
-        match value {
-            serde_bencode::value::Value::Bytes(string) => unsafe {
-                let string = String::from_utf8_unchecked(string);
-                Ok(serde_json::Value::String(string))
-            },
-            serde_bencode::value::Value::Int(integer) => {
-                let integer = serde_json::Number::from(integer);
-                Ok(serde_json::Value::Number(integer))
-            }
-            serde_bencode::value::Value::List(list) => {
-                let array = list
-                    .into_iter()
-                    .map(decode)
-                    .collect::<Result<Vec<serde_json::Value>>>()?;
-                Ok(serde_json::Value::Array(array))
-            }
-            serde_bencode::value::Value::Dict(dict) => unsafe {
-                let mut object: serde_json::Map<String, serde_json::Value> =
-                    serde_json::Map::with_capacity(dict.len());
-                for (k, v) in dict.into_iter() {
-                    object.insert(String::from_utf8_unchecked(k), decode(v)?);
-                }
-                Ok(serde_json::Value::Object(object))
-            },
-        }
-    }
-
     let value = serde_bencode::from_bytes(encoded_value)?;
 
     decode(value)
+}
+
+fn decode(value: serde_bencode::value::Value) -> Result<serde_json::Value> {
+    match value {
+        serde_bencode::value::Value::Bytes(string) => unsafe {
+            let string = String::from_utf8_unchecked(string);
+            Ok(serde_json::Value::String(string))
+        },
+        serde_bencode::value::Value::Int(integer) => {
+            let integer = serde_json::Number::from(integer);
+            Ok(serde_json::Value::Number(integer))
+        }
+        serde_bencode::value::Value::List(list) => {
+            let array = list
+                .into_iter()
+                .map(decode)
+                .collect::<Result<Vec<serde_json::Value>>>()?;
+            Ok(serde_json::Value::Array(array))
+        }
+        serde_bencode::value::Value::Dict(dict) => unsafe {
+            let mut object: serde_json::Map<String, serde_json::Value> =
+                serde_json::Map::with_capacity(dict.len());
+            for (k, v) in dict.into_iter() {
+                object.insert(String::from_utf8_unchecked(k), decode(v)?);
+            }
+            Ok(serde_json::Value::Object(object))
+        },
+    }
 }
 
 #[cfg(test)]

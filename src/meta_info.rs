@@ -55,7 +55,7 @@ pub struct Info {
     /// Piece length: number of bytes in each piece (integer)
     plen: usize,
 
-    /// Pieces: string consisting of the concatenation of all 20-byte SHA1 hash values,
+    /// `pieces`: string consisting of the concatenation of all 20-byte SHA1 hash values,
     /// one per piece (byte string, i.e. not urlencoded)
     ///
     /// We keep it as a vector of strings, where each element corresponds to one piece.
@@ -106,12 +106,12 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     let contents_vec: Vec<u8> = fs::read(path)?;
     let contents: &[u8] = contents_vec.as_ref();
 
-    let decoded = decode_bencoded_value(contents)?;
+    let contents_b_decoded = decode_bencoded_value(contents)?;
 
-    let announce = &decoded["announce"].to_string();
+    let announce = &contents_b_decoded["announce"].to_string();
     let announce = String::from(&announce[1..announce.len() - 1]);
 
-    let created_by = match decoded.get("created by") {
+    let created_by = match contents_b_decoded.get("created by") {
         Some(created_by) => {
             let created_by = created_by.to_string();
             String::from(&created_by[1..created_by.len() - 1])
@@ -119,7 +119,7 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
         None => "".to_string(),
     };
 
-    let info = &decoded["info"];
+    let info = &contents_b_decoded["info"];
 
     let name = info["name"].to_string();
     let name = String::from(&name[1..name.len() - 1]);
@@ -140,13 +140,13 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     let plen = info["piece length"].to_string().parse::<usize>()?;
 
     let pieces = &info["pieces"];
-    let serialized = &serde_bencode::to_bytes(pieces)?;
-    let start = serialized
+    let pieces_b_encoded = &serde_bencode::to_bytes(pieces)?;
+    let start = pieces_b_encoded
         .iter()
         .position(|elt| elt.eq(&b':')) // b':' == 0x3a == 58
         .expect("expected a ':'")
         + 1;
-    let pieces_string = serialized[start..].to_vec();
+    let pieces_string = pieces_b_encoded[start..].to_vec();
     let pcs_len = pieces_string.len();
     if pcs_len % SHA1_LEN != 0 {
         panic!(
