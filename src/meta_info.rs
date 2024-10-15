@@ -50,10 +50,10 @@ pub struct MetaInfo {
 #[derive(Debug)]
 pub struct Info {
     /// Single-file or multiple-file torrent
-    mode: Mode,
+    pub mode: Mode,
 
-    /// Piece length: number of bytes in each piece (integer)
-    plen: usize,
+    /// `piece length`: number of bytes in each piece (integer)
+    pub plen: usize,
 
     /// `pieces`: string consisting of the concatenation of all 20-byte SHA1 hash values,
     /// one per piece (byte string, i.e. not urlencoded)
@@ -62,10 +62,10 @@ pub struct Info {
     /// So, each element is a 20-byte SHA1 hash sum.
     /// This is more efficient, because we should parse the torrent file only once,
     /// and then we can use all these fields multiple times without new calculations.
-    pieces: Vec<String>,
+    pub pieces: Vec<String>,
 
     /// SHA1 sum of the Info dictionary
-    info_hash: String,
+    pub info_hash: String,
 }
 
 /// Single-file or multiple-file torrent
@@ -96,10 +96,10 @@ pub struct Files {
     ///
     /// A list of UTF-8 encoded strings corresponding to subdirectory names,
     /// the last of which is the actual file name (a zero length list is an error case).
-    path: Vec<String>,
+    pub path: Vec<String>,
 
     /// Length of the file in bytes (integer)
-    length: usize,
+    pub length: usize,
 }
 
 pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {

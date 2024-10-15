@@ -14,4 +14,5 @@ pub struct Args {
 pub enum Commands {
     Decode { encoded_value: String },
     Info { path: PathBuf },
+    Peers { path: PathBuf },
 }
