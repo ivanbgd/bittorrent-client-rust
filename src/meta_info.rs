@@ -157,18 +157,11 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     let hex_pieces_string = hex::encode(pieces_string);
     let num_pcs = pcs_len / SHA1_LEN;
     let mut pieces: Vec<String> = Vec::with_capacity(num_pcs);
-
-    // Variant 1: Doesn't allocate
-    // let mut cur = hex_pieces_string.as_str();
-    // while !cur.is_empty() {
-    //     let (piece, remainder) = cur.split_at(2 * SHA1_LEN);
-    //     pieces.push(piece.parse()?);
-    //     cur = remainder;
-    // }
-
-    // Variant 2: Allocates
-    for piece in hex_pieces_string.as_bytes().chunks(2 * SHA1_LEN) {
-        pieces.push(String::from_utf8(Vec::from(piece))?);
+    let mut cur = hex_pieces_string.as_str();
+    while !cur.is_empty() {
+        let (piece, remainder) = cur.split_at(2 * SHA1_LEN);
+        pieces.push(piece.parse()?);
+        cur = remainder;
     }
 
     let info_hash = calc_sha1(info)?;
