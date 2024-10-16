@@ -6,7 +6,6 @@
 //!
 //! https://wiki.theory.org/BitTorrentSpecification#Tracker_HTTP.2FHTTPS_Protocol
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -75,17 +74,12 @@ pub fn get_peers(path: &PathBuf) -> Result<Vec<String>> {
     let num_peers = peers_len / PEER_LEN;
 
     let mut peers: Vec<String> = Vec::with_capacity(num_peers);
-    let mut cur = peers_string.as_slice();
-    while !cur.is_empty() {
-        let (peer, remainder) = cur.split_at(PEER_LEN);
+    for peer in peers_string.chunks(PEER_LEN) {
         let port: u16 = (peer[4] as u16) << 8 | (peer[5] as u16);
-        let socket = SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3])),
-            port,
-        )
-        .to_string();
-        peers.push(socket);
-        cur = remainder;
+        peers.push(format!(
+            "{}.{}.{}.{}:{port}",
+            peer[0], peer[1], peer[2], peer[3]
+        ));
     }
 
     Ok(peers)
