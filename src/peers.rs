@@ -7,12 +7,12 @@
 //! https://wiki.theory.org/BitTorrentSpecification#Tracker_HTTP.2FHTTPS_Protocol
 
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use anyhow::Result;
 use serde_derive::Serialize;
 
 use crate::constants::*;
-use crate::decode::decode_bencoded_value;
 use crate::meta_info::{meta_info, Mode};
 
 pub fn get_peers(path: &PathBuf) -> Result<Vec<String>> {
@@ -45,14 +45,26 @@ pub fn get_peers(path: &PathBuf) -> Result<Vec<String>> {
 
     let resp = client.get(&req).query(&query).send()?.bytes()?;
     let resp = Vec::from(resp);
-    let resp_b_decoded = decode_bencoded_value(&resp)?;
-    let _interval = &resp_b_decoded["interval"].to_string().parse::<usize>()?;
-    let peers = &resp_b_decoded["peers"].to_string();
-    let peers = peers.as_bytes();
-    let peers_bytes = &peers[1..peers.len() - 1];
-    let peers_len = peers_bytes.len();
-    eprintln!("peers: {:?} --- {}", peers_bytes, peers_len);
+    let response;
+    unsafe {
+        response = String::from_utf8_unchecked(resp);
+    }
+    let peers_idx = response
+        .find("peers")
+        .expect("'peers' expected in response");
+    let r = response.as_bytes();
+    let rest = &r[peers_idx..];
+    let start = rest
+        .iter()
+        .position(|elt| elt.eq(&b':')) // b':' == 0x3a == 58
+        .expect("expected a ':'")
+        + 1;
+    let peers_len_bytes = &rest["peers".len()..start - 1];
+    let peers_len = String::from_utf8(Vec::from(peers_len_bytes))?;
+    let peers_len = usize::from_str(&peers_len)?;
+    let peers_string = rest[start..start + peers_len].to_vec();
 
+    let peers_len = peers_string.len();
     // We only support compact mode, but that is the recommended mode anyway, so it should be enough.
     // https://www.bittorrent.org/beps/bep_0023.html
     // The assignment itself only supports the compact mode.
@@ -65,7 +77,7 @@ pub fn get_peers(path: &PathBuf) -> Result<Vec<String>> {
     let num_peers = peers_len / PEER_LEN;
 
     let mut peers: Vec<String> = Vec::with_capacity(num_peers);
-    for peer in peers_bytes.chunks(PEER_LEN) {
+    for peer in peers_string.chunks(PEER_LEN) {
         let port: u16 = (peer[4] as u16) << 8 | (peer[5] as u16);
         peers.push(format!(
             "{}.{}.{}.{}:{port}",
@@ -128,7 +140,7 @@ struct Query {
     compact: usize,
 }
 
-// #[derive(Debug)] //, serde_derive::Deserialize)]
+// #[derive(Debug, serde_derive::Deserialize)]
 // struct Response {
 //     interval: usize,
 //     peers: String,
