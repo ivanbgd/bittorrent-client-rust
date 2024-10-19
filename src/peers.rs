@@ -65,9 +65,12 @@ pub fn get_peers(path: &PathBuf) -> Result<Vec<String>> {
     let peers_string = rest[start..start + peers_len].to_vec();
 
     let peers_len = peers_string.len();
+    // We only support compact mode, but that is the recommended mode anyway, so it should be enough.
+    // https://www.bittorrent.org/beps/bep_0023.html
+    // The assignment itself only supports the compact mode.
     if peers_len % PEER_LEN != 0 {
         panic!(
-            "Length of 'peers', {}, is not divisible by {}.",
+            "Length of 'peers', {}, is not divisible by {} (compact mode).",
             peers_len, PEER_LEN
         );
     }
@@ -137,11 +140,11 @@ struct Query {
     compact: usize,
 }
 
-// #[derive(Debug, serde_derive::Deserialize)]
-// struct Response {
-//     interval: usize,
-//     peers: String,
-// }
+#[derive(Debug)] //, serde_derive::Deserialize)]
+struct Response {
+    interval: usize,
+    peers: String,
+}
 
 #[cfg(test)]
 mod tests {

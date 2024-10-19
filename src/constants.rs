@@ -8,6 +8,7 @@ pub const PEER_ID: &str = "AAA3AAAAAAA7AAAABAAA";
 pub const PORT: usize = 6881;
 pub const UPLOADED: usize = 0;
 pub const DOWNLOADED: usize = 0;
-pub const COMPACT: usize = 1;
 
+/// https://www.bittorrent.org/beps/bep_0023.html
+pub const COMPACT: usize = 1;
 pub const PEER_LEN: usize = 6;
