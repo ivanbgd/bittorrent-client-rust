@@ -1,3 +1,5 @@
+//! Currently, only the single-file case is supported.
+
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::PathBuf;
@@ -47,6 +49,8 @@ pub struct MetaInfo {
 /// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
 ///
 /// https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
+///
+/// Currently, only the single-file case is supported.
 #[derive(Debug)]
 pub struct Info {
     /// Single-file or multiple-file torrent
@@ -64,26 +68,44 @@ pub struct Info {
     /// and then we can use all these fields multiple times without new calculations.
     pub pieces: Vec<String>,
 
+    /// In the single file case, the name key is the name of a file.
+    ///
+    /// In the multiple file case, it's the name of the directory in which to store all files.
+    pub name: String,
+
     /// SHA1 sum of the Info dictionary
+    ///
+    /// This field is not specified in BitTorrent Specification, but we added it for easier use.
     pub info_hash: String,
 }
 
 /// Single-file or multiple-file torrent
 ///
-/// In the single file case, length maps to the length of the file in bytes.
+/// In the single file case, `length` maps to the length of the file in bytes.
 ///
-/// In the single file case, the name key is the name of a file.
-/// In the multiple file case, it's the name of a directory.
+/// In the multiple file case, `files` contains all files' info.
+///
+/// Currently, only the single-file case is supported.
 #[derive(Debug)]
 pub enum Mode {
-    SingleFile { name: String, length: usize },
-    MultipleFile { name: String, files: Files },
+    /// Single-file torrent
+    SingleFile { length: usize },
+
+    /// Multiple-file torrent (not supported!)
+    ///
+    /// For the purposes of the other keys, the multi-file case is treated as only having a single file by
+    /// concatenating the files in the order they appear in the files list.
+    /// The files list is the value files maps to, and is a list of dictionaries containing the following keys:
+    /// `path` and `length`.
+    MultipleFile { files: Vec<File> },
 }
 
 /// A list of dictionaries, one for each file
+///
+/// Applicable to [`Mode::MultipleFile`] only.
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct Files {
+pub struct File {
     /// A list containing one or more string elements that together represent the path and filename
     ///
     /// Each element in the list corresponds to either a directory name or, in the case of the final element,
@@ -126,13 +148,13 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
 
     let mode = if let Some(length) = info.get("length") {
         let length = length.to_string().parse::<usize>()?;
-        Mode::SingleFile { name, length }
+        Mode::SingleFile { length }
     } else if let Some(_files) = info.get("files") {
-        let files = Files {
+        let files = vec![File {
             path: vec![],
             length: 0,
-        };
-        Mode::MultipleFile { name, files }
+        }];
+        Mode::MultipleFile { files }
     } else {
         panic!("Either 'length' or 'files' field must be present in the torrent file, but none is.")
     };
@@ -173,6 +195,7 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
             mode,
             plen,
             pieces,
+            name,
             info_hash,
         },
     })
@@ -181,8 +204,8 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
 impl Display for MetaInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let length = match &self.info.mode {
-            Mode::SingleFile { name: _, length } => length,
-            Mode::MultipleFile { name: _, files: _ } => &0,
+            Mode::SingleFile { length } => length,
+            Mode::MultipleFile { files: _ } => &0,
         };
 
         let pieces = &self.info.pieces;

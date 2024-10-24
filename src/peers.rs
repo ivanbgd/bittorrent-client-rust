@@ -26,8 +26,8 @@ pub fn get_peers(path: &PathBuf) -> Result<Vec<String>> {
 
     let mode = meta.info.mode;
     let left = match mode {
-        Mode::SingleFile { name: _, length } => length,
-        Mode::MultipleFile { name: _, files: _ } => 0,
+        Mode::SingleFile { length } => length,
+        Mode::MultipleFile { files: _ } => 0,
     };
 
     let client = reqwest::blocking::Client::new();
