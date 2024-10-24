@@ -1,14 +1,35 @@
-//! Currently, only the single-file case is supported.
+//! Metainfo File Structure
+//!
+//! https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
+//!
+//! https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
+//!
+//! Currently, only the single-file torrents are supported.
 
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 
 use crate::constants::SHA1_LEN;
-use crate::decode::decode_bencoded_value;
-use crate::hash::calc_sha1;
+use crate::pieces::Pieces;
+
+/// Reads a torrent file, `path`, and returns its contents, which are meta info.
+///
+/// Torrent files are b-encoded and binary, not text files, so this function decodes them.
+///
+/// Additionally, updates the info hash field that's not part of the BitTorrent Specification.
+pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
+    let contents = fs::read(path)?;
+
+    let mut metainfo: MetaInfo = serde_bencode::from_bytes(&contents)?;
+    metainfo.info.info_hash = metainfo.info_hash_hex()?;
+
+    Ok(metainfo)
+}
 
 /// Metainfo File Structure
 ///
@@ -20,16 +41,67 @@ use crate::hash::calc_sha1;
 /// https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
 ///
 /// https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MetaInfo {
     /// The "announce" URL of the tracker (string)
     pub announce: String,
 
     /// Created by: (optional) name and version of the program used to create the .torrent (string)
+    #[serde(rename = "created by")]
+    #[serde(default)]
     pub created_by: String,
 
     /// Info Dictionary: a dictionary that describes the file(s) of the torrent.
     pub info: Info,
+}
+
+impl MetaInfo {
+    /// Calculates [`Sha1`] hash sum of the [`Info`] dictionary
+    ///
+    /// The output [`Sha1`] hash sum is 20 bytes long.
+    fn info_hash(&self) -> Result<[u8; SHA1_LEN]> {
+        let b_encoded_serialized = serde_bencode::to_bytes(&self.info)?;
+        let hash: [u8; SHA1_LEN] = *Sha1::digest(b_encoded_serialized).as_ref();
+        assert_eq!(hash.len(), SHA1_LEN);
+        Ok(hash)
+    }
+
+    /// Calculates [`Sha1`] hash sum of the [`Info`] dictionary
+    /// and encodes it as hex string using lowercase characters.
+    ///
+    /// The expected resulting [`String`] length is twice the length of the [`Sha1`] sum,
+    /// because each byte is represented as two nibbles (two hex digits).
+    ///
+    /// As [`Sha1`] hash sum is 20 bytes long, the output info hash string is 40 characters long.
+    fn info_hash_hex(&self) -> Result<String> {
+        let hash = self.info_hash()?;
+        let hash = hex::encode(hash);
+        assert_eq!(hash.len(), 2 * SHA1_LEN);
+        Ok(hash)
+    }
+}
+
+impl Display for MetaInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let length = match &self.info.mode {
+            Mode::SingleFile { length } => length,
+            Mode::MultipleFile { files: _ } => todo!(),
+        };
+
+        let pieces = &self.info.pieces.0;
+        let hashes_len = pieces.len() * 2 * SHA1_LEN + pieces.len();
+        let mut piece_hashes = String::with_capacity(hashes_len);
+        for piece in pieces {
+            piece_hashes += &hex::encode(piece);
+            piece_hashes += "\n";
+        }
+
+        write!(
+            f,
+            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}",
+            self.announce, length, self.info.info_hash, self.info.plen, piece_hashes
+        )
+    }
 }
 
 /// Info Dictionary
@@ -50,32 +122,30 @@ pub struct MetaInfo {
 ///
 /// https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
 ///
-/// Currently, only the single-file case is supported.
-#[derive(Debug)]
+/// Currently, only the single-file torrents are supported.
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Info {
     /// Single-file or multiple-file torrent
+    #[serde(flatten)]
     pub mode: Mode,
 
     /// `piece length`: number of bytes in each piece (integer)
+    #[serde(rename = "piece length")]
     pub plen: usize,
 
     /// `pieces`: string consisting of the concatenation of all 20-byte SHA1 hash values,
     /// one per piece (byte string, i.e. not urlencoded)
-    ///
-    /// We keep it as a vector of strings, where each element corresponds to one piece.
-    /// So, each element is a 20-byte SHA1 hash sum.
-    /// This is more efficient, because we should parse the torrent file only once,
-    /// and then we can use all these fields multiple times without new calculations.
-    pub pieces: Vec<String>,
+    pub pieces: Pieces,
 
     /// In the single file case, the name key is the name of a file.
     ///
     /// In the multiple file case, it's the name of the directory in which to store all files.
     pub name: String,
 
-    /// SHA1 sum of the Info dictionary
+    /// Hexadecimal representation of the SHA1 sum of the Info dictionary, 40 bytes long
     ///
     /// This field is not specified in BitTorrent Specification, but we added it for easier use.
+    #[serde(skip)]
     pub info_hash: String,
 }
 
@@ -85,8 +155,9 @@ pub struct Info {
 ///
 /// In the multiple file case, `files` contains all files' info.
 ///
-/// Currently, only the single-file case is supported.
-#[derive(Debug)]
+/// Currently, only the single-file torrents are supported.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum Mode {
     /// Single-file torrent
     SingleFile { length: usize },
@@ -104,7 +175,7 @@ pub enum Mode {
 ///
 /// Applicable to [`Mode::MultipleFile`] only.
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct File {
     /// A list containing one or more string elements that together represent the path and filename
     ///
@@ -122,106 +193,6 @@ pub struct File {
 
     /// Length of the file in bytes (integer)
     pub length: usize,
-}
-
-pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
-    let contents_vec: Vec<u8> = fs::read(path)?;
-    let contents: &[u8] = contents_vec.as_ref();
-
-    let contents_b_decoded = decode_bencoded_value(contents)?;
-
-    let announce = &contents_b_decoded["announce"].to_string();
-    let announce = String::from(&announce[1..announce.len() - 1]);
-
-    let created_by = match contents_b_decoded.get("created by") {
-        Some(created_by) => {
-            let created_by = created_by.to_string();
-            String::from(&created_by[1..created_by.len() - 1])
-        }
-        None => "".to_string(),
-    };
-
-    let info = &contents_b_decoded["info"];
-
-    let name = info["name"].to_string();
-    let name = String::from(&name[1..name.len() - 1]);
-
-    let mode = if let Some(length) = info.get("length") {
-        let length = length.to_string().parse::<usize>()?;
-        Mode::SingleFile { length }
-    } else if let Some(_files) = info.get("files") {
-        let files = vec![File {
-            path: vec![],
-            length: 0,
-        }];
-        Mode::MultipleFile { files }
-    } else {
-        panic!("Either 'length' or 'files' field must be present in the torrent file, but none is.")
-    };
-
-    let plen = info["piece length"].to_string().parse::<usize>()?;
-
-    let pieces = &info["pieces"];
-    let pieces_b_encoded = &serde_bencode::to_bytes(pieces)?;
-    let start = pieces_b_encoded
-        .iter()
-        .position(|elt| elt.eq(&b':')) // b':' == 0x3a == 58
-        .expect("expected a ':'")
-        + 1;
-    let pieces_string = pieces_b_encoded[start..].to_vec();
-    let pcs_len = pieces_string.len();
-    if pcs_len % SHA1_LEN != 0 {
-        panic!(
-            "Length of 'pieces', {}, is not divisible by SHA1 sum length, which is {}.",
-            pcs_len, SHA1_LEN
-        );
-    }
-    let hex_pieces_string = hex::encode(pieces_string);
-    let num_pcs = pcs_len / SHA1_LEN;
-    let mut pieces: Vec<String> = Vec::with_capacity(num_pcs);
-    let mut cur = hex_pieces_string.as_str();
-    while !cur.is_empty() {
-        let (piece, remainder) = cur.split_at(2 * SHA1_LEN);
-        pieces.push(piece.parse()?);
-        cur = remainder;
-    }
-
-    let info_hash = calc_sha1(info)?;
-
-    Ok(MetaInfo {
-        announce,
-        created_by,
-        info: Info {
-            mode,
-            plen,
-            pieces,
-            name,
-            info_hash,
-        },
-    })
-}
-
-impl Display for MetaInfo {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let length = match &self.info.mode {
-            Mode::SingleFile { length } => length,
-            Mode::MultipleFile { files: _ } => &0,
-        };
-
-        let pieces = &self.info.pieces;
-        let hashes_len = pieces.len() * 2 * SHA1_LEN + pieces.len();
-        let mut piece_hashes: String = String::with_capacity(hashes_len);
-        for piece in pieces {
-            piece_hashes += piece;
-            piece_hashes += "\n";
-        }
-
-        write!(
-            f,
-            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}",
-            self.announce, length, self.info.info_hash, self.info.plen, piece_hashes
-        )
-    }
 }
 
 #[cfg(test)]

@@ -33,3 +33,31 @@ Note: This section is for stages 2 and beyond.
    the first time you run it. Subsequent runs will be fast.
 3. Commit your changes and run `git push origin master` to submit your solution
    to CodeCrafters. Test output will be streamed to your terminal.
+
+# Running the Program
+
+- `./your_bittorrent.sh decode <encoded_value>`
+- `./your_bittorrent.sh info <path_to_torrent_file>`
+- `./your_bittorrent.sh peers <path_to_torrent_file>`
+
+We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
+
+Sample torrent files are provided in the root of the repository,
+as well as in the [test_samples](./test_samples) subdirectory.
+
+*Note:* The sample torrent files can be used for testing the code, and in this case they work, but these are **NOT**
+real-world torrent files!
+
+# Limitations
+
+This challenge is **NOT** production-ready!
+
+First, it only supports single-file torrents, but even they are not fully, i.e., properly supported,
+so even they don't work.
+
+Secondly, multi-file torrents are not supported at all. This solution has placeholders to support the functionality,
+but it hasn't been implemented.
+
+We only support compact mode, but that is the recommended mode anyway, so it should be enough.  
+https://www.bittorrent.org/beps/bep_0023.html  
+The assignment itself only supports the compact mode.

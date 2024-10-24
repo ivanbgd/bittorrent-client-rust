@@ -9,7 +9,7 @@ use clap::Parser;
 use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::decode::decode_bencoded_value;
 use bittorrent_starter_rust::meta_info::meta_info;
-use bittorrent_starter_rust::peers::get_peers;
+use bittorrent_starter_rust::tracker::get_peers;
 
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -25,9 +25,7 @@ fn main() -> Result<()> {
         }
         Commands::Peers { path } => {
             let peers = get_peers(path)?;
-            for peer in peers {
-                println!("{}", peer);
-            }
+            println!("{}", peers);
         }
     }
 
