@@ -21,7 +21,7 @@ use crate::constants::*;
 use crate::meta_info::{meta_info, Mode};
 use crate::tracker::peers::Peers;
 
-/// Returns the peers.
+/// Fetches and returns the peers list.
 ///
 /// Reads a torrent file, `path`, extracts its contents (meta info), sends an HTTP GET request with query
 /// parameters obtained from the meta info to the tracker (a server), from which it then gets the peers
@@ -141,21 +141,22 @@ mod peers {
     //! A compact representation of the peer list
 
     use std::fmt::{Display, Formatter};
+    use std::net::{Ipv4Addr, SocketAddrV4};
 
     use serde::de::{Deserialize, Deserializer, Error, Visitor};
 
-    use crate::constants::PEER_LEN;
+    use crate::constants::{PEER_DISPLAY_LEN, PEER_LEN};
 
     #[derive(Debug)]
-    pub struct Peers(pub Vec<String>);
+    pub struct Peers(pub Vec<SocketAddrV4>);
 
     impl Display for Peers {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
             let peers = &self.0;
-            let res_len = 21 * peers.len();
+            let res_len = PEER_DISPLAY_LEN * peers.len();
             let mut res = String::with_capacity(res_len);
             for peer in peers {
-                res += peer;
+                res += &peer.to_string();
                 res += "\n";
             }
 
@@ -186,8 +187,10 @@ mod peers {
                 Ok(Peers(
                     v.chunks_exact(PEER_LEN)
                         .map(|peer| {
-                            let port = u16::from_be_bytes([peer[4], peer[5]]);
-                            format!("{}.{}.{}.{}:{port}", peer[0], peer[1], peer[2], peer[3])
+                            SocketAddrV4::new(
+                                Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3]),
+                                u16::from_be_bytes([peer[4], peer[5]]),
+                            )
                         })
                         .collect(),
                 ))
@@ -218,9 +221,9 @@ mod tests {
     #[test]
     fn get_peers_sample_torrent() {
         let peers = get_peers(&PathBuf::from("sample.torrent")).unwrap();
-        let mut res = String::with_capacity(21 * peers.0.len());
+        let mut res = String::with_capacity(PEER_DISPLAY_LEN * peers.0.len());
         for peer in &peers.0 {
-            res += peer;
+            res += &peer.to_string();
             res += "\n";
         }
         assert_eq!(

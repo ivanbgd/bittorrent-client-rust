@@ -14,4 +14,9 @@ pub const DOWNLOADED: usize = 0;
 
 /// https://www.bittorrent.org/beps/bep_0023.html
 pub const COMPACT: u8 = 1;
+
+/// Peer length in compact form
 pub const PEER_LEN: usize = 6;
+
+/// IP address (four octets), three dots, ':', port; example: "255.255.255.255:65535"
+pub const PEER_DISPLAY_LEN: usize = 21;
