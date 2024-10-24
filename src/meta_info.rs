@@ -85,7 +85,7 @@ impl Display for MetaInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let length = match &self.info.mode {
             Mode::SingleFile { length } => length,
-            Mode::MultipleFile { files: _ } => todo!(),
+            Mode::MultipleFile { files: _ } => unimplemented!(),
         };
 
         let pieces = &self.info.pieces.0;
