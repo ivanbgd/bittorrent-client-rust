@@ -27,39 +27,23 @@ pub fn handshake(path: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
     buf.extend([0; 8]);
     buf.extend(hex::decode(&info_hash)?);
     buf.extend(PEER_ID.bytes());
-    // eprintln!("{buf:?}"); //
-
-    let _handshake = Handshake {
-        pstrlen: BT_PROTO_LEN,
-        pstr: BT_PROTOCOL.to_string(),
-        reserved: [0; 8],
-        info_hash,
-        peer_id: PEER_ID.to_string(),
-    };
-
-    // buf.push(handshake.pstrlen);
-    // buf.extend(BT_PROTOCOL.bytes());
-    // eprintln!("{buf:?}"); //
 
     // Instead of a single peer we could pass a list of peers that we could get from the `get_peers` function,
     // but the automated tester expects a single hard-coded peer ID & port value.
     let mut stream = TcpStream::connect(peer)?;
 
-    // Doesn't get serialized
-    // let w = stream.write(&handshake)?;
-
     let written = stream.write(&buf)?;
     assert_eq!(HANDSHAKE_LEN, written);
 
     stream.read_exact(&mut buf)?;
-    // eprintln!("{buf:?}, {}", buf.len());
     let peer_id = &buf[48..];
     let peer_id = hex::encode(peer_id);
-    // eprintln!("{peer_id:?}, {}", peer_id.len());
 
     Ok(peer_id)
 }
 
+/// UNUSED - Doesn't get serialized
+///
 /// The handshake is a required message and must be the first message transmitted by the client.
 /// It is (49+len(pstr)) bytes long.
 ///
