@@ -39,6 +39,8 @@ Note: This section is for stages 2 and beyond.
 - `./your_bittorrent.sh decode <encoded_value>`
 - `./your_bittorrent.sh info <path_to_torrent_file>`
 - `./your_bittorrent.sh peers <path_to_torrent_file>`
+- `./your_bittorrent.sh handshake <path_to_torrent_file> <peer_ip>:<peer_port>`
+    - Peer's IP address and port can be obtained by running the `peers` command and picking any peer from the list.
 
 We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
 
@@ -58,6 +60,6 @@ so even they don't work.
 Secondly, multi-file torrents are not supported at all. This solution has placeholders to support the functionality,
 but it hasn't been implemented.
 
-We only support compact mode, but that is the recommended mode anyway, so it should be enough.  
+We only support compact mode, but that is the recommended mode in practice anyway, so it should be enough.  
 https://www.bittorrent.org/beps/bep_0023.html  
 The assignment itself only supports the compact mode.

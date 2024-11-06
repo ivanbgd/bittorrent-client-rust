@@ -1,7 +1,7 @@
 /// Length of the used hash sum, which is the [`sha1::Sha1`] sum, and its length is always 20
 pub const SHA1_LEN: usize = 20;
 
-/// Our own Peer ID
+/// Our own Peer ID, 20 bytes long
 ///
 /// https://wiki.theory.org/BitTorrentSpecification#peer_id
 ///
@@ -20,3 +20,10 @@ pub const PEER_LEN: usize = 6;
 
 /// IP address (four octets), three dots, ':', port; example: "255.255.255.255:65535"
 pub const PEER_DISPLAY_LEN: usize = 21;
+
+/// Length of string identifier of the protocol
+pub const BT_PROTO_LEN: u8 = 19;
+/// String identifier of the protocol
+pub const BT_PROTOCOL: &str = "BitTorrent protocol";
+/// Handshake message length
+pub const HANDSHAKE_LEN: usize = 68;

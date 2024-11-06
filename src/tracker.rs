@@ -143,9 +143,9 @@ mod peers {
     use std::fmt::{Display, Formatter};
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    use serde::de::{Deserialize, Deserializer, Error, Visitor};
-
     use crate::constants::{PEER_DISPLAY_LEN, PEER_LEN};
+    use serde::de::{Deserialize, Deserializer, Error, Visitor};
+    use serde::ser::{Serialize, Serializer};
 
     #[derive(Debug)]
     pub struct Peers(pub Vec<SocketAddrV4>);
@@ -209,6 +209,21 @@ mod peers {
             D: Deserializer<'de>,
         {
             deserializer.deserialize_bytes(PeersVisitor)
+        }
+    }
+
+    // Not required in our case, but implemented for reference
+    impl Serialize for Peers {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut seq = Vec::with_capacity(PEER_LEN * self.0.len());
+            for peer in &self.0 {
+                seq.extend(peer.ip().octets());
+                seq.extend(peer.port().to_be_bytes());
+            }
+            serializer.serialize_bytes(&seq)
         }
     }
 }

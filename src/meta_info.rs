@@ -21,7 +21,7 @@ use crate::pieces::Pieces;
 ///
 /// Torrent files are b-encoded and binary, not text files, so this function decodes them.
 ///
-/// Additionally, updates the info hash field that's not part of the BitTorrent Specification.
+/// Additionally, updates the info hash field which is not a part of the BitTorrent Specification.
 pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
     let contents = fs::read(path)?;
 
@@ -56,7 +56,7 @@ pub struct MetaInfo {
 }
 
 impl MetaInfo {
-    /// Calculates [`Sha1`] hash sum of the [`Info`] dictionary
+    /// Calculates [`Sha1`] hash sum of the [`Info`] dictionary.
     ///
     /// The output [`Sha1`] hash sum is 20 bytes long.
     fn info_hash(&self) -> Result<[u8; SHA1_LEN]> {
