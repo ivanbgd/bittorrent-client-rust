@@ -3,12 +3,22 @@
 //! https://www.bittorrent.org/beps/bep_0003.html#peer-protocol
 //!
 //! https://wiki.theory.org/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
+//!
+//! `$ ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>`
+//!
+//! `Peer ID: 0102030405060708090a0b0c0d0e0f1011121314`
+//!
+//! Exact value will be different as it is randomly generated.
+//!
+//! *Note:* To get a peer IP & port to test this locally, run `./your_bittorrent.sh peers sample.torrent`
+//! and pick any peer from the list.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddrV4, TcpStream};
 use std::path::PathBuf;
 
 use crate::constants::{BT_PROTOCOL, BT_PROTO_LEN, HANDSHAKE_LEN, PEER_ID};
+use crate::handshake::reserved::Reserved;
 use crate::meta_info::meta_info;
 
 use anyhow::Result;
@@ -21,6 +31,14 @@ pub fn handshake(path: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
     let meta = meta_info(path)?;
     let info_hash = meta.info.info_hash;
 
+    // let handshake = Handshake {
+    //     pstrlen: BT_PROTO_LEN,
+    //     pstr: BT_PROTOCOL.to_string(),
+    //     reserved: Reserved::new(),
+    //     info_hash,
+    //     peer_id: PEER_ID.to_string(),
+    // };
+
     let mut buf = Vec::with_capacity(HANDSHAKE_LEN);
     buf.push(BT_PROTO_LEN);
     buf.extend(BT_PROTOCOL.as_bytes());
@@ -28,9 +46,10 @@ pub fn handshake(path: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
     buf.extend(hex::decode(&info_hash)?);
     buf.extend(PEER_ID.bytes());
 
-    // Instead of a single peer we could pass a list of peers that we could get from the `get_peers` function,
-    // but the automated tester expects a single hard-coded peer ID & port value.
     let mut stream = TcpStream::connect(peer)?;
+
+    // let ww = buf.write(&handshake);
+    // let w = stream.write(&handshake)?;
 
     let written = stream.write(&buf)?;
     assert_eq!(HANDSHAKE_LEN, written);
@@ -42,7 +61,7 @@ pub fn handshake(path: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
     Ok(peer_id)
 }
 
-/// UNUSED - Doesn't get serialized
+/// Unused
 ///
 /// The handshake is a required message and must be the first message transmitted by the client.
 /// It is (49+len(pstr)) bytes long.
@@ -57,7 +76,7 @@ struct Handshake {
     pstr: String,
 
     /// Eight (8) reserved bytes. All current implementations use all zeroes.
-    reserved: [u8; 8],
+    reserved: Reserved,
 
     /// 20-byte SHA1 hash of the info key in the metainfo file.
     /// This is the same info_hash that is transmitted in tracker requests.
@@ -66,4 +85,63 @@ struct Handshake {
     /// 20-byte string used as a unique ID for the client.
     /// This is usually the same peer_id that is transmitted in tracker requests.
     peer_id: String,
+}
+
+/// Unused
+mod reserved {
+    use std::fmt::Formatter;
+
+    use serde::de::{Deserialize, Deserializer, Error, Visitor};
+    use serde::ser::{Serialize, Serializer};
+
+    #[derive(Debug)]
+    pub struct Reserved(pub [u8; 8]);
+
+    impl Reserved {
+        pub(crate) fn new() -> Self {
+            Self([0; 8])
+        }
+    }
+
+    struct ReservedVisitor;
+
+    impl<'de> Visitor<'de> for ReservedVisitor {
+        type Value = Reserved;
+
+        fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+            write!(formatter, "eight zero bytes",)
+        }
+
+        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            let length = v.len();
+            if length == 8 {
+                Ok(Reserved::new())
+            } else {
+                Err(E::custom(format!("array length, {}, is not 8", length)))
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Reserved {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_bytes(ReservedVisitor)
+        }
+    }
+
+    impl Serialize for Reserved {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let seq = self.0;
+
+            serializer.serialize_bytes(&seq)
+        }
+    }
 }
