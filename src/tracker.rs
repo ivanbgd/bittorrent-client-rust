@@ -11,6 +11,14 @@
 //! Also, only the compact mode for peers is supported, but this is the only recommended mode in practice anyway.
 //! https://www.bittorrent.org/beps/bep_0023.html
 //! The assignment itself only supports the compact mode.
+//!
+//! `$ ./your_bittorrent.sh peers sample.torrent`
+//!
+//! `165.232.41.73:51556`
+//!
+//! `165.232.38.164:51532`
+//!
+//! `165.232.35.114:51437`
 
 use std::path::PathBuf;
 
@@ -23,11 +31,11 @@ use crate::tracker::peers::Peers;
 
 /// Fetches and returns the peers list.
 ///
-/// Reads a torrent file, `path`, extracts its contents (meta info), sends an HTTP GET request with query
+/// Reads a torrent file, extracts its contents (meta info), sends an HTTP GET request with query
 /// parameters obtained from the meta info to the tracker (a server), from which it then gets the peers
 /// list in the response, in the compact mode.
-pub fn get_peers(path: &PathBuf) -> Result<Peers> {
-    let meta = meta_info(path)?;
+pub fn get_peers(torrent: &PathBuf) -> Result<Peers> {
+    let meta = meta_info(torrent)?;
     let tracker = meta.announce;
     let info_hash = meta.info.info_hash;
 
@@ -223,6 +231,7 @@ mod peers {
                 seq.extend(peer.ip().octets());
                 seq.extend(peer.port().to_be_bytes());
             }
+
             serializer.serialize_bytes(&seq)
         }
     }

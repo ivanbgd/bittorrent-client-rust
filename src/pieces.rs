@@ -63,6 +63,7 @@ impl Serialize for Pieces {
         S: Serializer,
     {
         let seq = self.0.concat();
+
         serializer.serialize_bytes(&seq)
     }
 }

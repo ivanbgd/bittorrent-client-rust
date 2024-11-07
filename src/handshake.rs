@@ -27,8 +27,8 @@ use serde::{Deserialize, Serialize};
 /// Sends a handshake to a peer, and receives a handshake from the peer, in the same format.
 ///
 /// Returns the 40 characters long hexadecimal representation of the peer ID received during the handshake.
-pub fn handshake(path: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
-    let meta = meta_info(path)?;
+pub fn handshake(torrent: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
+    let meta = meta_info(torrent)?;
     let info_hash = meta.info.info_hash;
 
     let mut buf = Vec::with_capacity(HANDSHAKE_LEN);
@@ -76,13 +76,16 @@ struct Handshake {
     peer_id: String,
 }
 
-/// Unused
+/// Unused module
 mod reserved {
     use std::fmt::Formatter;
 
     use serde::de::{Deserialize, Deserializer, Error, Visitor};
     use serde::ser::{Serialize, Serializer};
 
+    /// The Reserved field
+    ///
+    /// Eight (8) reserved bytes. All current implementations use all zeroes.
     #[derive(Debug)]
     pub struct Reserved(pub [u8; 8]);
 

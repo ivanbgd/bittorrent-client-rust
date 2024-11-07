@@ -13,7 +13,7 @@ pub struct Args {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Decode a b-encoded value
+    /// Decode a Bencoded value
     Decode {
         /// String, integer, list or dictionary
         encoded_value: String,
@@ -22,13 +22,13 @@ pub enum Commands {
     /// Print a torrent's meta info
     Info {
         /// Path to a torrent file
-        path: PathBuf,
+        torrent: PathBuf,
     },
 
     /// Print the peers list in compact mode
     Peers {
         /// Path to a torrent file
-        path: PathBuf,
+        torrent: PathBuf,
     },
 
     /// Establish a TCP connection with a peer and complete a handshake
@@ -36,7 +36,7 @@ pub enum Commands {
     /// Prints the hexadecimal representation of the peer ID received during the handshake.
     Handshake {
         /// Path to a torrent file
-        path: PathBuf,
+        torrent: PathBuf,
         /// <peer_ip>:<peer_port> (example: 127.0.0.1:8080)
         peer: std::net::SocketAddrV4,
     },

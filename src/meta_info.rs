@@ -1,10 +1,28 @@
 //! Metainfo File Structure
 //!
-//! https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
-//!
 //! https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
 //!
+//! https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
+//!
 //! Currently, only the single-file torrents are supported.
+//!
+//! `$ ./your_bittorrent.sh info sample.torrent`
+//!
+//! `Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce`
+//!
+//! `Length: 92063`
+//!
+//! `Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f`
+//!
+//! `Piece Length: 32768`
+//!
+//! `Piece Hashes:`
+//!
+//! `e876f67a2a8886e8f36b136726c30fa29703022d`
+//!
+//! `6e2275e604a0766656736e81ff10b55204ad8d35`
+//!
+//! `f00d937a0213df1982bc8d097227ad9e909acc17`
 
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -17,13 +35,13 @@ use sha1::{Digest, Sha1};
 use crate::constants::SHA1_LEN;
 use crate::pieces::Pieces;
 
-/// Reads a torrent file, `path`, and returns its contents, which are meta info.
+/// Reads a torrent file and returns its contents, which are meta info.
 ///
 /// Torrent files are b-encoded and binary, not text files, so this function decodes them.
 ///
 /// Additionally, updates the info hash field which is not a part of the BitTorrent Specification.
-pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
-    let contents = fs::read(path)?;
+pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo> {
+    let contents = fs::read(torrent)?;
 
     let mut metainfo: MetaInfo = serde_bencode::from_bytes(&contents)?;
     metainfo.info.info_hash = metainfo.info_hash_hex()?;
@@ -38,9 +56,9 @@ pub fn meta_info(path: &PathBuf) -> Result<MetaInfo> {
 /// The content of a metainfo file (the file ending in ".torrent") is a bencoded dictionary,
 /// containing the keys listed below. All character string values are UTF-8 encoded.
 ///
-/// https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
-///
 /// https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
+///
+/// https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MetaInfo {
     /// The "announce" URL of the tracker (string)
@@ -118,9 +136,9 @@ impl Display for MetaInfo {
 ///
 /// We also add `info_hash` to hold SHA1 sum of the Info dictionary.
 ///
-/// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
-///
 /// https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
+///
+/// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
 ///
 /// Currently, only the single-file torrents are supported.
 #[derive(Debug, Deserialize, Serialize)]

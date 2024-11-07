@@ -1,10 +1,32 @@
+//! Bencode
+//!
+//! https://www.bittorrent.org/beps/bep_0003.html#bencoding
+//!
+//! https://wiki.theory.org/BitTorrentSpecification#Bencoding
+//!
+//! https://en.wikipedia.org/wiki/Bencode
+//!
+//! `$ ./your_bittorrent.sh decode 5:hello`
+//!
+//! `hello`
+//!
+//! `$ ./your_bittorrent.sh decode i52e`
+//!
+//! `52`
+//!
+//! `$ ./your_bittorrent.sh decode l5:helloi52ee`
+//!
+//! `["hello",52]`
+//!
+//! `$ ./your_bittorrent.sh decode d3:foo3:bar5:helloi52ee`
+//!
+//! `{"foo":"bar","hello":52}`
+
 use anyhow::Result;
 use serde_bencode;
 use serde_json;
 
-/// https://wiki.theory.org/BitTorrentSpecification#Bencoding
-///
-/// https://www.bittorrent.org/beps/bep_0003.html#bencoding
+/// Decodes a Bencoded value
 pub fn decode_bencoded_value(encoded_value: &[u8]) -> Result<serde_json::Value> {
     let value = serde_bencode::from_bytes(encoded_value)?;
 
