@@ -31,14 +31,6 @@ pub fn handshake(path: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
     let meta = meta_info(path)?;
     let info_hash = meta.info.info_hash;
 
-    // let handshake = Handshake {
-    //     pstrlen: BT_PROTO_LEN,
-    //     pstr: BT_PROTOCOL.to_string(),
-    //     reserved: Reserved::new(),
-    //     info_hash,
-    //     peer_id: PEER_ID.to_string(),
-    // };
-
     let mut buf = Vec::with_capacity(HANDSHAKE_LEN);
     buf.push(BT_PROTO_LEN);
     buf.extend(BT_PROTOCOL.as_bytes());
@@ -47,9 +39,6 @@ pub fn handshake(path: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
     buf.extend(PEER_ID.bytes());
 
     let mut stream = TcpStream::connect(peer)?;
-
-    // let ww = buf.write(&handshake);
-    // let w = stream.write(&handshake)?;
 
     let written = stream.write(&buf)?;
     assert_eq!(HANDSHAKE_LEN, written);
