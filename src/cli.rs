@@ -12,6 +12,7 @@ pub struct Args {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(rename_all = "snake_case")]
 pub enum Commands {
     /// Decode a Bencoded value
     Decode {
@@ -39,5 +40,19 @@ pub enum Commands {
         torrent: PathBuf,
         /// <peer_ip>:<peer_port> (example: 127.0.0.1:8080)
         peer: std::net::SocketAddrV4,
+    },
+
+    /// Download a piece and save it to disk
+    // #[command(name = "download_piece")]
+    DownloadPiece {
+        /// Path to an output file for the piece
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Path to a torrent file
+        torrent: PathBuf,
+
+        /// Zero-based piece index
+        piece_index: usize,
     },
 }

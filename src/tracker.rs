@@ -151,9 +151,10 @@ mod peers {
     use std::fmt::{Display, Formatter};
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    use crate::constants::{PEER_DISPLAY_LEN, PEER_LEN};
     use serde::de::{Deserialize, Deserializer, Error, Visitor};
     use serde::ser::{Serialize, Serializer};
+
+    use crate::constants::{PEER_DISPLAY_LEN, PEER_LEN};
 
     #[derive(Debug)]
     pub struct Peers(pub Vec<SocketAddrV4>);

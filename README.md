@@ -41,6 +41,7 @@ Note: This section is for stages 2 and beyond.
 - `./your_bittorrent.sh peers <path_to_torrent_file>`
 - `./your_bittorrent.sh handshake <path_to_torrent_file> <peer_ip>:<peer_port>`
     - Peer's IP address and port can be obtained by running the `peers` command and picking any peer from the list.
+- `./your_bittorrent.sh download_piece -o <path_to_output_file> <path_to_torrent_file> <piece_index>`
 
 We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
 

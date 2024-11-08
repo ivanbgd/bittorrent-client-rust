@@ -17,7 +17,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddrV4, TcpStream};
 use std::path::PathBuf;
 
-use crate::constants::{BT_PROTOCOL, BT_PROTO_LEN, HANDSHAKE_LEN, PEER_ID};
+use crate::constants::{BT_PROTOCOL, BT_PROTO_LEN, HANDSHAKE_MSG_LEN, HANDSHAKE_RESERVED, PEER_ID};
 use crate::handshake::reserved::Reserved;
 use crate::meta_info::meta_info;
 
@@ -31,17 +31,17 @@ pub fn handshake(torrent: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
     let meta = meta_info(torrent)?;
     let info_hash = meta.info.info_hash;
 
-    let mut buf = Vec::with_capacity(HANDSHAKE_LEN);
+    let mut buf = Vec::with_capacity(HANDSHAKE_MSG_LEN);
     buf.push(BT_PROTO_LEN);
     buf.extend(BT_PROTOCOL.as_bytes());
-    buf.extend([0; 8]);
+    buf.extend(HANDSHAKE_RESERVED);
     buf.extend(hex::decode(&info_hash)?);
     buf.extend(PEER_ID.bytes());
 
     let mut stream = TcpStream::connect(peer)?;
 
     let written = stream.write(&buf)?;
-    assert_eq!(HANDSHAKE_LEN, written);
+    assert_eq!(HANDSHAKE_MSG_LEN, written);
 
     stream.read_exact(&mut buf)?;
     let peer_id = &buf[48..];
