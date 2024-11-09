@@ -1,4 +1,4 @@
-//! Tracker Request & Response, and Peers
+//! # Tracker Request & Response, and Peers
 //!
 //! https://www.bittorrent.org/beps/bep_0003.html#trackers
 //!
@@ -37,11 +37,11 @@ use crate::tracker::peers::Peers;
 pub fn get_peers(torrent: &PathBuf) -> Result<Peers> {
     let meta = meta_info(torrent)?;
     let tracker = meta.announce;
-    let info_hash = meta.info.info_hash;
+    let info_hash_hex = meta.info.info_hash_hex;
 
     // The 20 byte sha1 hash of the bencoded form of the info value from the metainfo file.
     // This value will almost certainly have to be escaped.
-    let info_hash = url_encode(&info_hash);
+    let info_hash = url_encode(&info_hash_hex);
 
     let mode = meta.info.mode;
 

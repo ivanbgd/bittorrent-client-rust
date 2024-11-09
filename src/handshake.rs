@@ -1,62 +1,14 @@
-//! Peer Wire Protocol & Handshake
+//! UNUSED MODULE
 //!
-//! https://www.bittorrent.org/beps/bep_0003.html#peer-protocol
-//!
-//! https://wiki.theory.org/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
-//!
-//! `$ ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>`
-//!
-//! `Peer ID: 0102030405060708090a0b0c0d0e0f1011121314`
-//!
-//! Exact value will be different as it is randomly generated.
-//!
-//! *Note:* To get a peer IP & port to test this locally, run `./your_bittorrent.sh peers sample.torrent`
-//! and pick any peer from the list.
+//! Kept as a reference for serde.
 
-use std::io::{Read, Write};
-use std::net::{SocketAddrV4, TcpStream};
-use std::path::PathBuf;
-
-use crate::constants::{BT_PROTOCOL, BT_PROTO_LEN, HANDSHAKE_MSG_LEN, HANDSHAKE_RESERVED, PEER_ID};
-use crate::handshake::reserved::Reserved;
-use crate::meta_info::meta_info;
-
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-
-/// Sends a handshake to a peer, and receives a handshake from the peer, in the same format.
-///
-/// Returns the 40 characters long hexadecimal representation of the peer ID received during the handshake.
-pub fn handshake(torrent: &PathBuf, peer: &SocketAddrV4) -> Result<String> {
-    let meta = meta_info(torrent)?;
-    let info_hash = meta.info.info_hash;
-
-    let mut buf = Vec::with_capacity(HANDSHAKE_MSG_LEN);
-    buf.push(BT_PROTO_LEN);
-    buf.extend(BT_PROTOCOL.as_bytes());
-    buf.extend(HANDSHAKE_RESERVED);
-    buf.extend(hex::decode(&info_hash)?);
-    buf.extend(PEER_ID.bytes());
-
-    let mut stream = TcpStream::connect(peer)?;
-
-    let written = stream.write(&buf)?;
-    assert_eq!(HANDSHAKE_MSG_LEN, written);
-
-    stream.read_exact(&mut buf)?;
-    let peer_id = &buf[48..];
-    let peer_id = hex::encode(peer_id);
-
-    Ok(peer_id)
-}
-
-/// Unused
+/// Unused struct
 ///
 /// The handshake is a required message and must be the first message transmitted by the client.
 /// It is (49+len(pstr)) bytes long.
 ///
 /// handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct Handshake {
     /// String length of <pstr>, as a single raw byte
     pstrlen: u8,
@@ -65,7 +17,7 @@ struct Handshake {
     pstr: String,
 
     /// Eight (8) reserved bytes. All current implementations use all zeroes.
-    reserved: Reserved,
+    reserved: reserved::Reserved,
 
     /// 20-byte SHA1 hash of the info key in the metainfo file.
     /// This is the same info_hash that is transmitted in tracker requests.
@@ -83,6 +35,8 @@ mod reserved {
     use serde::de::{Deserialize, Deserializer, Error, Visitor};
     use serde::ser::{Serialize, Serializer};
 
+    use crate::constants::HANDSHAKE_RESERVED;
+
     /// The Reserved field
     ///
     /// Eight (8) reserved bytes. All current implementations use all zeroes.
@@ -91,7 +45,7 @@ mod reserved {
 
     impl Reserved {
         pub(crate) fn new() -> Self {
-            Self([0; 8])
+            Self(HANDSHAKE_RESERVED)
         }
     }
 

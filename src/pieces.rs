@@ -1,3 +1,5 @@
+//! # Pieces
+//!
 //! Pieces are SHA1 hash values, and they are concatenated into a byte string in a torrent file.
 
 use std::fmt;

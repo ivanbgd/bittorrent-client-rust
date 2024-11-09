@@ -1,4 +1,4 @@
-//! Metainfo File Structure
+//! # Metainfo File Structure
 //!
 //! https://www.bittorrent.org/beps/bep_0003.html#metainfo-files
 //!
@@ -44,7 +44,8 @@ pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo> {
     let contents = fs::read(torrent)?;
 
     let mut metainfo: MetaInfo = serde_bencode::from_bytes(&contents)?;
-    metainfo.info.info_hash = metainfo.info_hash_hex()?;
+    metainfo.info.info_hash = metainfo.info_hash()?;
+    metainfo.info.info_hash_hex = metainfo.info_hash_hex()?;
 
     Ok(metainfo)
 }
@@ -117,7 +118,7 @@ impl Display for MetaInfo {
         write!(
             f,
             "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}",
-            self.announce, length, self.info.info_hash, self.info.plen, piece_hashes
+            self.announce, length, self.info.info_hash_hex, self.info.plen, piece_hashes
         )
     }
 }
@@ -160,11 +161,17 @@ pub struct Info {
     /// In the multiple file case, it's the name of the directory in which to store all files.
     pub name: String,
 
-    /// Hexadecimal representation of the SHA1 sum of the Info dictionary, 40 bytes long
+    /// Plain byte representation of the SHA1 sum of the Info dictionary, 20 bytes long
     ///
     /// This field is not specified in BitTorrent Specification, but we added it for easier use.
     #[serde(skip)]
-    pub info_hash: String,
+    pub info_hash: [u8; SHA1_LEN],
+
+    /// Hexadecimal string representation of the SHA1 sum of the Info dictionary, 40 bytes long
+    ///
+    /// This field is not specified in BitTorrent Specification, but we added it for easier use.
+    #[serde(skip)]
+    pub info_hash_hex: String,
 }
 
 /// Single-file or multiple-file torrent

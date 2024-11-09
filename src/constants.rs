@@ -1,3 +1,7 @@
+//! # Constants
+//!
+//! Constants used throughout the application
+
 /// Length of the used hash sum, which is the [`sha1::Sha1`] sum, and its length is always 20
 pub const SHA1_LEN: usize = 20;
 

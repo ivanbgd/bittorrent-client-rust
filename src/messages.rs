@@ -41,7 +41,7 @@ pub fn download_piece(output: &PathBuf, torrent: &PathBuf, piece_index: usize) -
     buf.push(BT_PROTO_LEN);
     buf.extend(BT_PROTOCOL.as_bytes());
     buf.extend(HANDSHAKE_RESERVED);
-    buf.extend(hex::decode(&info_hash)?);
+    buf.extend(&info_hash);
     buf.extend(PEER_ID.bytes());
 
     let written = stream.write(&buf)?;

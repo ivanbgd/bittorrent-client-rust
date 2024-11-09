@@ -1,4 +1,6 @@
-//! Bencode
+//! # Decode
+//!
+//! Decoder for Bencoded values
 //!
 //! https://www.bittorrent.org/beps/bep_0003.html#bencoding
 //!
