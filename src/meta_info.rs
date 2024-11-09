@@ -41,6 +41,7 @@ use crate::pieces::Pieces;
 ///
 /// Additionally, updates the info hash field which is not a part of the BitTorrent Specification.
 pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo> {
+    eprintln!("META INFO CALLED!"); //todo
     let contents = fs::read(torrent)?;
 
     let mut metainfo: MetaInfo = serde_bencode::from_bytes(&contents)?;
@@ -163,13 +164,13 @@ pub struct Info {
 
     /// Plain byte representation of the SHA1 sum of the Info dictionary, 20 bytes long
     ///
-    /// This field is not specified in BitTorrent Specification, but we added it for easier use.
+    /// This field is not a part of BitTorrent Specification, but we added it for easier use.
     #[serde(skip)]
     pub info_hash: [u8; SHA1_LEN],
 
     /// Hexadecimal string representation of the SHA1 sum of the Info dictionary, 40 bytes long
     ///
-    /// This field is not specified in BitTorrent Specification, but we added it for easier use.
+    /// This field is not a part of BitTorrent Specification, but we added it for easier use.
     #[serde(skip)]
     pub info_hash_hex: String,
 }

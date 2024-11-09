@@ -10,30 +10,30 @@ use clap::Parser;
 
 use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::decode::decode_bencoded_value;
-use bittorrent_starter_rust::messages::download_piece;
+use bittorrent_starter_rust::errors::ae2s;
 use bittorrent_starter_rust::meta_info::meta_info;
-use bittorrent_starter_rust::peer_comm::handshake;
+use bittorrent_starter_rust::peer_comm::{download_piece, handshake};
 use bittorrent_starter_rust::tracker::get_peers;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), String> {
     let args = Args::parse();
 
     match &args.command {
         Commands::Decode { encoded_value } => {
-            let decoded_value = decode_bencoded_value(encoded_value.as_bytes())?;
+            let decoded_value = decode_bencoded_value(encoded_value.as_bytes()).map_err(ae2s)?;
             println!("{}", decoded_value);
         }
         Commands::Info { torrent } => {
-            let meta = meta_info(torrent)?;
+            let meta = meta_info(torrent).map_err(ae2s)?;
             println!("{}", meta);
         }
         Commands::Peers { torrent } => {
-            let peers = get_peers(torrent)?;
+            let (peers, _) = get_peers(torrent).map_err(ae2s)?;
             println!("{}", peers);
         }
         Commands::Handshake { torrent, peer } => {
-            let peer = handshake(torrent, peer)?;
+            let peer = handshake(peer, &meta_info(torrent).map_err(ae2s)?.info.info_hash)?;
             println!("Peer ID: {}", peer);
         }
         Commands::DownloadPiece {

@@ -3,7 +3,8 @@
 pub mod cli;
 pub mod constants;
 pub mod decode;
-pub mod messages;
+pub mod errors;
+pub mod message;
 pub mod meta_info;
 pub mod peer;
 pub mod peer_comm;

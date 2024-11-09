@@ -29,12 +29,16 @@ use crate::constants::*;
 use crate::meta_info::{meta_info, Mode};
 use crate::tracker::peers::Peers;
 
-/// Fetches and returns the peers list.
+/// Fetches and returns the peers list and info hash of the torrent file.
 ///
 /// Reads a torrent file, extracts its contents (meta info), sends an HTTP GET request with query
 /// parameters obtained from the meta info to the tracker (a server), from which it then gets the peers
 /// list in the response, in the compact mode.
-pub fn get_peers(torrent: &PathBuf) -> Result<Peers> {
+///
+/// The returned info hash is 20 bytes long plain SHA1 hash sum of the Info dictionary from the torrent file.
+/// The reason for including it in the return value is as an optimization, because it can then be reused in
+/// higher-level functions that call this function, such as [`crate::peer_comm::download_piece`], for example.
+pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, [u8; SHA1_LEN])> {
     let meta = meta_info(torrent)?;
     let tracker = meta.announce;
     let info_hash_hex = meta.info.info_hash_hex;
@@ -68,7 +72,7 @@ pub fn get_peers(torrent: &PathBuf) -> Result<Peers> {
     let resp = Vec::from(resp);
     let response: TrackerResponse = serde_bencode::from_bytes(&resp)?;
 
-    Ok(response.peers)
+    Ok((response.peers, meta.info.info_hash))
 }
 
 /// https://en.wikipedia.org/wiki/Percent-encoding
@@ -156,6 +160,7 @@ mod peers {
 
     use crate::constants::{PEER_DISPLAY_LEN, PEER_LEN};
 
+    /// Wrapper around a vector of peers' socket addresses
     #[derive(Debug)]
     pub struct Peers(pub Vec<SocketAddrV4>);
 
@@ -246,8 +251,8 @@ mod tests {
     #[test]
     fn get_peers_sample_torrent() {
         let peers = get_peers(&PathBuf::from("sample.torrent")).unwrap();
-        let mut res = String::with_capacity(PEER_DISPLAY_LEN * peers.0.len());
-        for peer in &peers.0 {
+        let mut res = String::with_capacity(PEER_DISPLAY_LEN * peers.0 .0.len());
+        for peer in &peers.0 .0 {
             res += &peer.to_string();
             res += "\n";
         }
