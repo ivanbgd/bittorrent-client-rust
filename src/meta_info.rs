@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
 use crate::constants::SHA1_LEN;
+use crate::errors::MetaInfoError;
 use crate::pieces::Pieces;
 
 /// Reads a torrent file and returns its contents, which are meta info.
@@ -40,7 +41,7 @@ use crate::pieces::Pieces;
 /// Torrent files are b-encoded and binary, not text files, so this function decodes them.
 ///
 /// Additionally, updates the info hash field which is not a part of the BitTorrent Specification.
-pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo> {
+pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo, MetaInfoError> {
     eprintln!("META INFO CALLED!"); //todo
     let contents = fs::read(torrent)?;
 

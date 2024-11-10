@@ -31,7 +31,7 @@ use std::net::SocketAddrV4;
 use std::path::PathBuf;
 // use std::sync::OnceLock;
 
-use anyhow::Result;
+use anyhow::{ensure, Error, Result};
 
 use crate::constants::{DEF_MSG_LEN, SHA1_LEN};
 use crate::errors::PeerError;
@@ -90,7 +90,7 @@ pub fn download_piece(
     output: &PathBuf,
     torrent: &PathBuf,
     piece_index: usize,
-) -> Result<(), PeerError> {
+) -> Result<(), Error> {
     let output = File::create(output)?;
     let mut file_writer = BufWriter::new(output);
 
@@ -125,7 +125,18 @@ pub fn download_piece(
     let read = stream.read(&mut buf)?;
     eprintln!("{}, {:?}", read, buf); // todo remove
     let msg: Message = (&buf[..]).into();
-    eprintln!("{:?}", msg); //todo remove
+    eprintln!("{:?} {}", msg, msg.id); //todo remove
+    ensure!(
+        msg.id == MessageId::Bitfield,
+        PeerError::WrongMessageId(msg.id, MessageId::Bitfield)
+    );
+    // ensure!(
+    //     msg.id == MessageId::Bitfield,
+    //     PeerError::from((msg.id, MessageId::Bitfield))
+    // );
+    // if msg.id == MessageId::Bitfield {
+    //     return Err(PeerError::from((msg.id, MessageId::Bitfield)));
+    // }
 
     // Send the Interested message
     let msg = Message::new(MessageId::Interested, None);

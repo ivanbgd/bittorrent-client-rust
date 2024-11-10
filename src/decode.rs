@@ -28,13 +28,18 @@ use anyhow::Result;
 use serde_bencode;
 use serde_json;
 
-/// Decodes a Bencoded value
+/// Decodes a Bencoded value:
+/// - string (`5:hello` -> `hello`),
+/// - integer (`i52e` -> `52`),
+/// - list (`l5:helloi52ee`, `["hello",52]`),
+/// - dictionary (`d3:foo3:bar5:helloi52ee` -> `{"foo":"bar","hello":52}`).
 pub fn decode_bencoded_value(encoded_value: &[u8]) -> Result<serde_json::Value> {
     let value = serde_bencode::from_bytes(encoded_value)?;
 
     decode(value)
 }
 
+/// The inner worker function for decoding a Bencoded value
 fn decode(value: serde_bencode::value::Value) -> Result<serde_json::Value> {
     match value {
         serde_bencode::value::Value::Bytes(string) => unsafe {

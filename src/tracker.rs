@@ -26,6 +26,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
+use crate::errors::TrackerError;
 use crate::meta_info::{meta_info, Info, Mode};
 use crate::tracker::peers::Peers;
 
@@ -39,7 +40,7 @@ use crate::tracker::peers::Peers;
 /// because it can then be reused in higher-level functions that call this function,
 /// such as [`crate::peer_comm::download_piece`], for example.
 /// It contains info hash that is 20 bytes long plain SHA1 hash sum of the [`Info`] dictionary from the torrent file.
-pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info)> {
+pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
     let meta = meta_info(torrent)?;
     let tracker = meta.announce;
     let info_hash_hex = &meta.info.info_hash_hex;

@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter};
 use std::io::{Read, Write};
 use std::net::{SocketAddrV4, TcpStream};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use crate::constants::*;
 use crate::errors::PeerError;
@@ -73,7 +73,7 @@ impl Peer {
             self.peer_id = Some(<[u8; SHA1_LEN]>::try_from(peer_id)?);
             eprintln!("hs peer_id: {peer_id:?}"); //todo
         } else {
-            return Err(PeerError::HandshakeError(anyhow!(
+            return Err(PeerError::HandshakeError(format!(
                 "received handshake parameters from peer {} don't match the sent parameters",
                 self.addr
             )));

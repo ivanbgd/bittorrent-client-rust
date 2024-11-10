@@ -4,10 +4,12 @@
 //!
 //! https://wiki.theory.org/BitTorrentSpecification#Messages
 
+use std::fmt::{Display, Formatter};
+
 /// Message types
 ///
 /// All non-keepalive messages contain a single byte which holds their type.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MessageId {
     /// choke: `<len=0001><id=0>`
     ///
@@ -85,6 +87,12 @@ pub enum MessageId {
     Port = 9,
 }
 
+impl Display for MessageId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self as *const Self as u8)
+    }
+}
+
 impl From<MessageId> for u8 {
     fn from(value: MessageId) -> u8 {
         value as u8
@@ -133,7 +141,7 @@ impl From<u8> for MessageId {
 #[derive(Debug)]
 pub struct Message<'a> {
     len: u32,
-    id: MessageId,
+    pub id: MessageId,
     payload: Option<&'a [u8]>,
 }
 

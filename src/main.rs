@@ -25,15 +25,15 @@ async fn main() -> Result<(), String> {
             println!("{}", decoded_value);
         }
         Commands::Info { torrent } => {
-            let meta = meta_info(torrent).map_err(ae2s)?;
+            let meta = meta_info(torrent)?;
             println!("{}", meta);
         }
         Commands::Peers { torrent } => {
-            let (peers, _) = get_peers(torrent).map_err(ae2s)?;
+            let (peers, _) = get_peers(torrent)?;
             println!("{}", peers);
         }
         Commands::Handshake { torrent, peer } => {
-            let peer = handshake(peer, &meta_info(torrent).map_err(ae2s)?.info.info_hash)?;
+            let peer = handshake(peer, &meta_info(torrent)?.info.info_hash)?;
             println!("Peer ID: {}", peer);
         }
         Commands::DownloadPiece {
@@ -41,7 +41,7 @@ async fn main() -> Result<(), String> {
             torrent,
             piece_index,
         } => {
-            download_piece(output, torrent, *piece_index)?;
+            download_piece(output, torrent, *piece_index).map_err(ae2s)?;
         }
     }
 
