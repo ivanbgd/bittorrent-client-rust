@@ -69,7 +69,7 @@ pub fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Result<Peer
 
     let mut peer = Peer::new(peer);
     peer.handshake(info_hash)?;
-    eprintln!("{peer}"); //todo
+    eprintln!("hs peer: {peer}"); //todo remove
 
     Ok(peer)
 }

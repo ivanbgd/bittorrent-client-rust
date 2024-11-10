@@ -71,7 +71,7 @@ impl Peer {
         {
             let peer_id = &buf[(HANDSHAKE_MSG_LEN - SHA1_LEN)..HANDSHAKE_MSG_LEN];
             self.peer_id = Some(<[u8; SHA1_LEN]>::try_from(peer_id)?);
-            eprintln!("{peer_id:?}"); //todo
+            eprintln!("hs peer_id: {peer_id:?}"); //todo
         } else {
             return Err(PeerError::HandshakeError(anyhow!(
                 "received handshake parameters from peer {} don't match the sent parameters",

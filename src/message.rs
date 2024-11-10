@@ -87,19 +87,19 @@ pub enum MessageId {
 
 impl From<MessageId> for u8 {
     fn from(value: MessageId) -> u8 {
-        // value as u8
-        match value {
-            MessageId::Choke => 0,
-            MessageId::Unchoke => 1,
-            MessageId::Interested => 2,
-            MessageId::NotInterested => 3,
-            MessageId::Have => 4,
-            MessageId::Bitfield => 5,
-            MessageId::Request => 6,
-            MessageId::Piece => 7,
-            MessageId::Cancel => 8,
-            MessageId::Port => 9,
-        }
+        value as u8
+        // match value {
+        //     MessageId::Choke => 0,
+        //     MessageId::Unchoke => 1,
+        //     MessageId::Interested => 2,
+        //     MessageId::NotInterested => 3,
+        //     MessageId::Have => 4,
+        //     MessageId::Bitfield => 5,
+        //     MessageId::Request => 6,
+        //     MessageId::Piece => 7,
+        //     MessageId::Cancel => 8,
+        //     MessageId::Port => 9,
+        // }
     }
 }
 
