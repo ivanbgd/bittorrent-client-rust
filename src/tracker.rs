@@ -26,31 +26,32 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
-use crate::meta_info::{meta_info, Mode};
+use crate::meta_info::{meta_info, Info, Mode};
 use crate::tracker::peers::Peers;
 
-/// Fetches and returns the peers list and info hash of the torrent file.
+/// Fetches and returns the peers list and the decoded [`Info`] section (dictionary) of the torrent file.
 ///
 /// Reads a torrent file, extracts its contents (meta info), sends an HTTP GET request with query
 /// parameters obtained from the meta info to the tracker (a server), from which it then gets the peers
 /// list in the response, in the compact mode.
 ///
-/// The returned info hash is 20 bytes long plain SHA1 hash sum of the Info dictionary from the torrent file.
-/// The reason for including it in the return value is as an optimization, because it can then be reused in
-/// higher-level functions that call this function, such as [`crate::peer_comm::download_piece`], for example.
-pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, [u8; SHA1_LEN])> {
+/// The reason for including the [`Info`] dictionary in the return value is as an optimization,
+/// because it can then be reused in higher-level functions that call this function,
+/// such as [`crate::peer_comm::download_piece`], for example.
+/// It contains info hash that is 20 bytes long plain SHA1 hash sum of the [`Info`] dictionary from the torrent file.
+pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info)> {
     let meta = meta_info(torrent)?;
     let tracker = meta.announce;
-    let info_hash_hex = meta.info.info_hash_hex;
+    let info_hash_hex = &meta.info.info_hash_hex;
 
     // The 20 byte sha1 hash of the bencoded form of the info value from the metainfo file.
     // This value will almost certainly have to be escaped.
     let info_hash = url_encode(&info_hash_hex);
 
-    let mode = meta.info.mode;
+    let mode = &meta.info.mode;
 
     // Currently, only the single-file torrents are supported.
-    let left = match mode {
+    let &left = match mode {
         Mode::SingleFile { length } => length,
         Mode::MultipleFile { files: _ } => unimplemented!(),
     };
@@ -72,7 +73,7 @@ pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, [u8; SHA1_LEN])> {
     let resp = Vec::from(resp);
     let response: TrackerResponse = serde_bencode::from_bytes(&resp)?;
 
-    Ok((response.peers, meta.info.info_hash))
+    Ok((response.peers, meta.info))
 }
 
 /// https://en.wikipedia.org/wiki/Percent-encoding

@@ -95,8 +95,9 @@ pub fn download_piece(
     let mut file_writer = BufWriter::new(output);
 
     // Perform the tracker GET request to get a list of peers
-    let (peers, info_hash) = get_peers(torrent)?;
+    let (peers, info) = get_peers(torrent)?;
     let peers = peers.0;
+    let info_hash = info.info_hash;
 
     // TODO: Create multiple peers and work with them at lower level.
     // TODO: Perhaps choose (at most) PIPELINED_REQUESTS peers and connect to all of them.
