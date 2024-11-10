@@ -85,8 +85,46 @@ pub enum MessageId {
     Port = 9,
 }
 
+impl From<MessageId> for u8 {
+    fn from(value: MessageId) -> u8 {
+        // value as u8
+        match value {
+            MessageId::Choke => 0,
+            MessageId::Unchoke => 1,
+            MessageId::Interested => 2,
+            MessageId::NotInterested => 3,
+            MessageId::Have => 4,
+            MessageId::Bitfield => 5,
+            MessageId::Request => 6,
+            MessageId::Piece => 7,
+            MessageId::Cancel => 8,
+            MessageId::Port => 9,
+        }
+    }
+}
+
+impl From<u8> for MessageId {
+    fn from(value: u8) -> MessageId {
+        match value {
+            0 => MessageId::Choke,
+            1 => MessageId::Unchoke,
+            2 => MessageId::Interested,
+            3 => MessageId::NotInterested,
+            4 => MessageId::Have,
+            5 => MessageId::Bitfield,
+            6 => MessageId::Request,
+            7 => MessageId::Piece,
+            8 => MessageId::Cancel,
+            9 => MessageId::Port,
+            _ => panic!("{}", format!("Unsupported message ID: {}", value)),
+        }
+    }
+}
+
 /// All messages in the protocol take the form of `<length prefix><message ID><payload>`.
 /// - The length prefix is a four byte big-endian value.
+///     - It doesn't count toward the total message length.
+///     - It represents the length of the rest of the message in bytes.
 /// - The message ID is a single decimal byte.
 /// - The payload is message-dependent.
 ///
@@ -94,22 +132,65 @@ pub enum MessageId {
 /// There is no message ID and no payload for it.
 #[derive(Debug)]
 pub struct Message<'a> {
-    len: u32, // todo: is it needed?
+    len: u32,
     id: MessageId,
-    payload: &'a [u8],
+    payload: Option<&'a [u8]>,
 }
 
 impl<'a> Message<'a> {
     /// Creates a new message consisting of message length, type and payload for sending to a peer
-    pub fn new(id: MessageId, payload: &'a [u8]) -> Self {
-        let len = 4 + 1 + payload.len() as u32;
+    pub fn new(id: MessageId, payload: Option<&'a [u8]>) -> Self {
+        let payload_len = payload.unwrap_or_default().len();
+        let len = 1 + payload_len as u32;
+        eprintln!("pay len 1 = {}", payload_len); // todo remove
 
         Self { len, id, payload }
     }
 }
 
-impl<'a> From<Message<'a>> for &'a [u8] {
-    fn from(val: Message<'a>) -> Self {
-        &[2u8; 1]
+/// Converts a [`Message`] into a byte stream.
+impl<'a> From<Message<'a>> for Vec<u8> {
+    /// Serializes a [`Message`] for a send transfer over the wire.
+    fn from(val: Message<'a>) -> Vec<u8> {
+        let len = u32::to_be_bytes(val.len);
+        let id = val.id.into();
+        eprintln!("len = {:?}, {}", len, val.len); // todo remove
+                                                   // let payload = match val.payload {
+                                                   //     Some(payload) => payload,
+                                                   //     None => &[0u8; 0],
+                                                   // };
+        let payload = val.payload.unwrap_or_default();
+        let payload_len = payload.len();
+        eprintln!("pay len 2 = {}", payload_len); // todo remove
+
+        let mut buf = Vec::with_capacity(4 + 1 + payload_len);
+
+        buf.extend(len);
+        buf.push(id);
+        buf.extend(payload);
+        eprintln!("buf len = {}, cap = {}", buf.len(), buf.capacity()); // todo remove
+
+        buf
+    }
+}
+
+/// Converts a byte stream into a [`Message`].
+impl<'a> From<&'a [u8]> for Message<'a> {
+    /// Deserializes a received [`Message`] from a wire transfer.
+    fn from(value: &'a [u8]) -> Message {
+        let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).unwrap_or_else(|_| {
+            panic!(
+                "Failed to deserialize message length; received: {:?}",
+                value
+            )
+        }));
+        let id = value[4].into(); // Same as: let id = MessageId::from(value[4]);
+        let payload = if len == 1 {
+            None
+        } else {
+            Some(&value[5..4 + len as usize])
+        };
+
+        Self { len, id, payload }
     }
 }

@@ -33,7 +33,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::constants::SHA1_LEN;
+use crate::constants::{DEF_MSG_LEN, SHA1_LEN};
 use crate::errors::PeerError;
 use crate::message::{Message, MessageId};
 use crate::peer::Peer;
@@ -109,31 +109,42 @@ pub fn download_piece(
         .stream
         .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr));
 
-    // let mut recv_buf: Vec<u8> = Vec::with_capacity(1 << 15);
-    // stream.read_exact(&mut recv_buf)?;
-    // eprintln!("{:?}", &recv_buf[..]);
+    // Read buffer
+    let mut buf = [0u8; DEF_MSG_LEN];
 
     // Receive a Bitfield message
-    let mut msg_len = [0u8; 4];
-    stream.read_exact(&mut msg_len)?;
-    let msg_len = u32::from_be_bytes(msg_len) as usize;
-    let mut buf = vec![0u8; msg_len];
-    stream.read_exact(&mut buf)?;
-    eprintln!("{}, {:?}", msg_len, buf); // todo remove
+    // let mut msg_len = [0u8; 4];
+    // stream.read_exact(&mut msg_len)?;
+    // let msg_len = u32::from_be_bytes(msg_len) as usize;
+    // let mut buf = vec![0u8; msg_len];
+    // stream.read_exact(&mut buf)?;
+    // eprintln!("{}, {:?}", msg_len, buf); // todo remove
+
+    // let mut buf = [0u8; DEF_MSG_LEN];
+    let read = stream.read(&mut buf)?;
+    eprintln!("{}, {:?}", read, buf); // todo remove
+    let msg: Message = (&buf[..]).into();
+    eprintln!("{:?}", msg); //todo remove
 
     // Send the Interested message
-    let msg = Message::new(MessageId::Interested, &[0u8; 0]);
-    stream.write_all(msg.into())?;
+    let msg = Message::new(MessageId::Interested, None);
+    let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+    eprintln!("{:?}", msg); // todo remove
+    stream.write_all(&msg)?;
 
     // Receive an Unchoke message
-    let mut buf = vec![0u8; 5];
-    // stream.read_exact(&mut buf)?;
-    eprintln!("{:?}", buf); // todo remove
+    // let mut buf = vec![0u8; 5];
+    // stream.read_exact(&mut buf[0..])?;
+    // eprintln!("{:?}", buf); // todo remove
+    let read = stream.read(&mut buf)?;
+    eprintln!("{}, {:?}", read, buf); // todo remove
+    let msg = Message::from(&buf[..]);
+    eprintln!("{:?}", msg); //todo remove
 
-    let peer = &peers[1];
-    let peer = handshake(peer, &info_hash)?;
-    let peer = &peers[2];
-    let peer = handshake(peer, &info_hash)?;
+    // let peer = &peers[1];
+    // let peer = handshake(peer, &info_hash)?;
+    // let peer = &peers[2];
+    // let peer = handshake(peer, &info_hash)?;
 
     Ok(())
 }

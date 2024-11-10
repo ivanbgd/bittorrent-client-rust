@@ -86,7 +86,7 @@ impl Peer {
 
     // TODO
     /// Receive a message from a peer
-    pub(crate) fn recv_msg(&mut self) -> Result<()> {
+    pub(crate) fn _recv_msg(&mut self) -> Result<()> {
         // let _ = self.stream.as_mut().unwrap().write(&[0u8; 1])?;
         Ok(())
     }
