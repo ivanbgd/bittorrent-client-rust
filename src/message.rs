@@ -139,21 +139,21 @@ impl From<u8> for MessageId {
 /// The keep-alive message is a message with zero bytes, specified with the length prefix set to zero.
 /// There is no message ID and no payload for it.
 #[derive(Debug)]
-// pub struct Message<'a> {
-pub struct Message {
+pub struct Message<'a> {
+    // pub struct Message {
     len: u32,
     pub id: MessageId,
-    // payload: Option<&'a [u8]>,
-    payload: Option<Vec<u8>>,
+    payload: Option<&'a [u8]>,
+    // payload: Option<Vec<u8>>,
 }
 
-// impl<'a> Message<'a> {
-impl Message {
+impl<'a> Message<'a> {
+    // impl Message {
     /// Creates a new message consisting of message length, type and payload for sending to a peer.
-    // pub fn new(id: MessageId, payload: Option<&'a [u8]>) -> Self {
-    pub fn new(id: MessageId, payload: Option<Vec<u8>>) -> Self {
-        // let payload_len = payload.unwrap_or_default().len();
-        let payload_len = payload.as_ref().unwrap_or(&vec![]).len();
+    pub fn new(id: MessageId, payload: Option<&'a [u8]>) -> Self {
+        // pub fn new(id: MessageId, payload: Option<Vec<u8>>) -> Self {
+        let payload_len = payload.unwrap_or_default().len();
+        // let payload_len = payload.as_ref().unwrap_or(&vec![]).len();
         let len = 1 + payload_len as u32;
         eprintln!("pay len 1 = {}", payload_len); // todo remove
 
@@ -162,11 +162,11 @@ impl Message {
 }
 
 /// Converts a [`Message`] into a byte stream.
-// impl<'a> From<Message<'a>> for Vec<u8> {
-impl From<Message> for Vec<u8> {
+impl<'a> From<Message<'a>> for Vec<u8> {
+    // impl From<Message> for Vec<u8> {
     /// Serializes a [`Message`] for a send transfer over the wire.
-    // fn from(val: Message<'a>) -> Vec<u8> {
-    fn from(val: Message) -> Vec<u8> {
+    fn from(val: Message<'a>) -> Vec<u8> {
+        // fn from(val: Message) -> Vec<u8> {
         let len = u32::to_be_bytes(val.len);
         let id = val.id.into();
         eprintln!("len = {:?}, {}", len, val.len); // todo remove
@@ -190,11 +190,11 @@ impl From<Message> for Vec<u8> {
 }
 
 /// Converts a byte stream into a [`Message`].
-// impl<'a> From<&'a [u8]> for Message<'a> {
-impl From<Vec<u8>> for Message {
+impl<'a> From<&'a [u8]> for Message<'a> {
+    // impl From<Vec<u8>> for Message {
     /// Deserializes a received [`Message`] from a wire transfer.
-    // fn from(value: &'a [u8]) -> Message {
-    fn from(value: Vec<u8>) -> Message {
+    fn from(value: &'a [u8]) -> Message {
+        // fn from(value: Vec<u8>) -> Message {
         let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).unwrap_or_else(|_| {
             panic!(
                 "Failed to deserialize message length; received: {:?}",
@@ -205,8 +205,8 @@ impl From<Vec<u8>> for Message {
         let payload = if len == 1 {
             None
         } else {
-            // Some(&value[5..4 + len as usize])
-            Some(value[5..4 + len as usize].to_vec())
+            Some(&value[5..4 + len as usize])
+            // Some(value[5..4 + len as usize].to_vec())
         };
 
         Self { len, id, payload }

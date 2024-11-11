@@ -122,6 +122,7 @@ pub fn download_piece(
     // We do this to have a cleaner code with greater readability.
     // Perhaps it would have been slightly more performant if we had used a write buffer directly,
     // without performing those function calls and conversions, but we chose a nicer-looking code.
+    // An alternative might be to have methods for sending and receiving messages.
     // This note stands as a reminder in case we sometime decide to improve performance.
 
     // Receive a Bitfield message
@@ -135,8 +136,8 @@ pub fn download_piece(
     // let mut buf = [0u8; DEF_MSG_LEN];
     let read = stream.read(&mut buf)?;
     eprintln!("{}, {:?}", read, buf); // todo remove
-                                      // let msg: Message = (&buf[..]).into();
-    let msg: Message = buf[..].to_vec().into();
+    let msg: Message = (&buf[..]).into();
+    // let msg: Message = buf[..].to_vec().into();
     eprintln!("{:?} {}", msg, msg.id); //todo remove
     if msg.id != MessageId::Bitfield {
         return Err(PeerError::from((msg.id, MessageId::Bitfield)));
@@ -154,8 +155,8 @@ pub fn download_piece(
     // eprintln!("{:?}", buf); // todo remove
     let read = stream.read(&mut buf)?;
     eprintln!("{}, {:?}", read, buf); // todo remove
-                                      // let msg = Message::from(&buf[..]);
-    let msg = Message::from(buf[..].to_vec());
+    let msg = Message::from(&buf[..]);
+    // let msg = Message::from(buf[..].to_vec());
     eprintln!("{:?}", msg); //todo remove
     if msg.id != MessageId::Unchoke {
         return Err(PeerError::from((msg.id, MessageId::Unchoke)));
@@ -201,9 +202,12 @@ pub fn download_piece(
     for i in 0..num_blocks_per_piece - 1 {
         let begin = u32::try_from(block_len << i)?;
         let length = block_len as u32;
+        let tmp =
+            <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
         let msg = Message::new(
             MessageId::Request,
-            Some(RequestPayload::new(index, begin, length).into()),
+            // Some(RequestPayload::new(index, begin, length).into().as_slice()),
+            Some(tmp.as_slice()),
         );
         let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
         eprintln!("{:?}", msg); // todo remove
