@@ -272,7 +272,7 @@ pub fn download_piece(
     }
 
     file_writer.write_all(&buf)?;
-    // file_writer.flush()?;
+    file_writer.flush()?;
 
     // let peer = &peers[1];
     // let peer = handshake(peer, &info_hash)?;
