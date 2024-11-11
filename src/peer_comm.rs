@@ -246,6 +246,7 @@ pub fn download_piece(
         }
 
         file_writer.write_all(&buf)?;
+        file_writer.flush()?;
     }
 
     // todo: last iteration
