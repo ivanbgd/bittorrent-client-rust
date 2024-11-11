@@ -164,7 +164,7 @@ pub fn download_piece(
         return Err(PeerError::from((msg.id, MessageId::Unchoke)));
     }
 
-    // Calculate where the requested piece begins in the file
+    // Calculate where the requested piece begins in the file - not needed in this function
     let _piece_begin = piece_index * info.plen;
 
     // The file to download is split into pieces of same fixed length,
@@ -178,12 +178,13 @@ pub fn download_piece(
     };
     let piece_len = info.plen;
     let mut last_piece_len = file_len % piece_len;
-    let num_pcs = file_len / piece_len + last_piece_len.clamp(0, 1);
+    let num_pcs = file_len / piece_len + last_piece_len.clamp(0, 1); // not needed in this function
     if last_piece_len == 0 {
         last_piece_len = piece_len;
     }
     let is_last_piece = piece_index == num_pcs - 1;
 
+    eprintln!("file_len = {}", file_len); // todo remove
     eprintln!("piece_len = {}", piece_len); // todo remove
     eprintln!("last_piece_len = {}", last_piece_len); // todo remove
     eprintln!("num_pcs = {}", num_pcs); // todo remove
@@ -203,6 +204,7 @@ pub fn download_piece(
     if last_block_len == 0 {
         last_block_len = block_len;
     }
+    let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece; // not needed in this function
     if is_last_piece {
         num_blocks_per_piece = num_blocks_in_last_piece;
     }
@@ -211,6 +213,7 @@ pub fn download_piece(
     eprintln!("num_blocks_per_piece = {}", num_blocks_per_piece); // todo remove
     eprintln!("num_blocks_in_last_piece = {}", num_blocks_in_last_piece); // todo remove
     eprintln!("last_block_len = {}", last_block_len); // todo remove
+    eprintln!("total_num_blocks = {}", total_num_blocks); // todo remove
 
     // Send a Request message for each block
     // Again, we don't request pieces but blocks.
@@ -245,7 +248,7 @@ pub fn download_piece(
             return Err(PeerError::from((msg.id, MessageId::Piece)));
         }
 
-        file_writer.write_all(msg.payload.expect("Expected to have some payload"))?;
+        file_writer.write_all(&msg.payload.expect("Expected to have some payload")[8..])?;
         file_writer.flush()?;
     }
 
@@ -272,7 +275,7 @@ pub fn download_piece(
         return Err(PeerError::from((msg.id, MessageId::Piece)));
     }
 
-    file_writer.write_all(msg.payload.expect("Expected to have some payload"))?;
+    file_writer.write_all(&msg.payload.expect("Expected to have some payload")[8..])?;
     file_writer.flush()?;
 
     // let peer = &peers[1];

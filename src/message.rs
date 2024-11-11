@@ -3,6 +3,20 @@
 //! https://www.bittorrent.org/beps/bep_0003.html#peer-messages
 //!
 //! https://wiki.theory.org/BitTorrentSpecification#Messages
+//!
+//! # Implementation note
+//!
+//! We are using the [`From`] trait and its associated [`From::from`] function.
+//! The function returns raw result of conversion, meaning, it is not wrapped in [`Result`].
+//! We cannot change that, because it is not our trait.
+//!
+//! This further means that we can only panic in case something goes wrong.
+//! The rest of our code, i.e., most of it, returns raw results wrapped in [`anyhow::Error`],
+//! so this part is not in line with the rest of the library code.
+//!
+//! This isn't crucial; we are just mentioning it in case we decide to change that in the future.
+//! We could write our own functions or methods that perform the conversions and that return
+//! results wrapped in [`anyhow::Error`].
 
 use std::fmt::{Display, Formatter};
 
@@ -67,7 +81,7 @@ pub enum MessageId {
     /// The payload contains the following information:
     ///   - index: integer specifying the zero-based piece index
     ///   - begin: integer specifying the zero-based byte offset within the piece
-    ///   - block: block of data, which is a subset of the piece specified by index.
+    ///   - block: block of data, which is a subset of the piece specified by index
     Piece = 7,
 
     /// cancel: `<len=0013><id=8><index><begin><length>`
@@ -192,7 +206,7 @@ impl<'a> From<Message<'a>> for Vec<u8> {
 /// Converts a byte stream into a [`Message`].
 impl<'a> From<&'a [u8]> for Message<'a> {
     // impl From<Vec<u8>> for Message {
-    /// Deserializes a received [`Message`] from a wire transfer.
+    /// Deserializes a [`Message`] received from a wire transfer.
     fn from(value: &'a [u8]) -> Message {
         // fn from(value: Vec<u8>) -> Message {
         let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).unwrap_or_else(|_| {
@@ -274,3 +288,47 @@ impl From<RequestPayload> for Vec<u8> {
 //         buf
 //     }
 // }
+
+/// Payload for the [`MessageId::Piece`] message
+///
+/// The payload contains the following information:
+///   - index: integer specifying the zero-based piece index
+///   - begin: integer specifying the zero-based byte offset within the piece
+///   - block: block of data, which is a subset of the piece specified by index
+#[derive(Debug)]
+pub struct PiecePayload<'a> {
+    index: u32,
+    begin: u32,
+    block: &'a [u8],
+}
+
+impl<'a> PiecePayload<'a> {
+    /// Creates a new piece payload consisting of piece index, byte offset within the piece
+    /// and block of data from a message received from a peer.
+    pub fn new(index: u32, begin: u32, block: &'a [u8]) -> Self {
+        Self {
+            index,
+            begin,
+            block,
+        }
+    }
+}
+
+/// Converts a byte stream into a [`PiecePayload`].
+impl<'a> From<&'a [u8]> for PiecePayload<'a> {
+    /// Deserializes a [`PiecePayload`] received from a wire transfer.
+    ///
+    /// This function is not aware of the requested length of the block of data,
+    /// hence it can't check whether it has received the entire requested block.
+    fn from(value: &'a [u8]) -> PiecePayload {
+        let index = u32::from_be_bytes(value[0..4].try_into().expect("failed to convert index"));
+        let begin = u32::from_be_bytes(value[4..8].try_into().expect("failed to convert begin"));
+        let block = &value[8..];
+
+        Self {
+            index,
+            begin,
+            block,
+        }
+    }
+}
