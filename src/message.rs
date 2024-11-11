@@ -143,7 +143,7 @@ pub struct Message<'a> {
     // pub struct Message {
     len: u32,
     pub id: MessageId,
-    payload: Option<&'a [u8]>,
+    pub payload: Option<&'a [u8]>,
     // payload: Option<Vec<u8>>,
 }
 
