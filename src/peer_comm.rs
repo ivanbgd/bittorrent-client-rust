@@ -204,16 +204,16 @@ pub fn download_piece(
         let length = block_len as u32;
         // let tmp =
         //     <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
-        let mut tmp: Vec<u8> = RequestPayload::new(index, begin, length).into();
+        // let tmp: &[u8] = RequestPayload::new(index, begin, length).into();
         let msg = Message::new(
             MessageId::Request,
-            // Some(RequestPayload::new(index, begin, length).into()),
-            Some(&tmp),
+            Some(RequestPayload::new(index, begin, length).into()),
+            // Some(tmp),
         );
         let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
         eprintln!("{:?}", msg); // todo remove
         stream.write_all(&msg)?;
-        tmp.clear();
+        // tmp.clear();
     }
     // todo: last iteration
 

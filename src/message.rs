@@ -238,17 +238,17 @@ impl RequestPayload {
     }
 }
 
-/// Converts a [`RequestPayload`] into a byte stream.
-impl From<RequestPayload> for Vec<u8> {
-    /// Serializes a [`RequestPayload`] for a send transfer over the wire.
-    fn from(value: RequestPayload) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(12);
-        buf.extend(u32::to_be_bytes(value.index));
-        buf.extend(u32::to_be_bytes(value.begin));
-        buf.extend(u32::to_be_bytes(value.length));
-        buf
-    }
-}
+// /// Converts a [`RequestPayload`] into a byte stream.
+// impl From<RequestPayload> for Vec<u8> {
+//     /// Serializes a [`RequestPayload`] for a send transfer over the wire.
+//     fn from(value: RequestPayload) -> Vec<u8> {
+//         let mut buf = Vec::with_capacity(12);
+//         buf.extend(u32::to_be_bytes(value.index));
+//         buf.extend(u32::to_be_bytes(value.begin));
+//         buf.extend(u32::to_be_bytes(value.length));
+//         buf
+//     }
+// }
 
 /// Converts a [`RequestPayload`] into a byte stream.
 impl<'a> From<RequestPayload> for &'a [u8] {
