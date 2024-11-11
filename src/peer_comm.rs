@@ -202,12 +202,12 @@ pub fn download_piece(
     for i in 0..num_blocks_per_piece - 1 {
         let begin = u32::try_from(block_len << i)?;
         let length = block_len as u32;
-        let tmp =
-            <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
+        // let tmp =
+        //     <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
         let msg = Message::new(
             MessageId::Request,
-            // Some(RequestPayload::new(index, begin, length).into().as_slice()),
-            Some(tmp.as_slice()),
+            Some(RequestPayload::new(index, begin, length).into()),
+            // Some(&tmp),
         );
         let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
         eprintln!("{:?}", msg); // todo remove

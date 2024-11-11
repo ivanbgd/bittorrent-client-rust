@@ -250,6 +250,19 @@ impl From<RequestPayload> for Vec<u8> {
     }
 }
 
+/// Converts a [`RequestPayload`] into a byte stream.
+impl<'a> From<RequestPayload> for &'a [u8] {
+    /// Serializes a [`RequestPayload`] for a send transfer over the wire.
+    fn from(value: RequestPayload) -> &'a [u8] {
+        let mut buf = Vec::with_capacity(12);
+        buf.extend(u32::to_be_bytes(value.index));
+        buf.extend(u32::to_be_bytes(value.begin));
+        buf.extend(u32::to_be_bytes(value.length));
+        buf.leak()
+    }
+}
+
+// DOESN'T COMPILE, NATURALLY
 // /// Converts a [`RequestPayload`] into a byte stream.
 // impl<'a> From<RequestPayload> for &'a [u8] {
 //     /// Serializes a [`RequestPayload`] for a send transfer over the wire.
@@ -258,19 +271,6 @@ impl From<RequestPayload> for Vec<u8> {
 //         buf.copy_from_slice(&u32::to_be_bytes(value.index));
 //         buf.copy_from_slice(&u32::to_be_bytes(value.begin));
 //         buf.copy_from_slice(&u32::to_be_bytes(value.length));
-//         buf
-//     }
-// }
-
-// /// Converts a [`RequestPayload`] into a byte stream.
-// impl<'a> From<RequestPayload> for &'a [u8] {
-//     /// Serializes a [`RequestPayload`] for a send transfer over the wire.
-//     fn from(value: RequestPayload) -> &'a [u8] {
-//         let mut buf = Vec::with_capacity(12);
-//         buf.extend(u32::to_be_bytes(value.index));
-//         buf.extend(u32::to_be_bytes(value.begin));
-//         buf.extend(u32::to_be_bytes(value.length));
-//         // buf.leak()
 //         buf
 //     }
 // }
