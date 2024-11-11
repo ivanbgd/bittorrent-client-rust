@@ -246,7 +246,7 @@ pub fn download_piece(
         }
 
         file_writer.write_all(msg.payload.expect("Expected to have some payload"))?;
-        // file_writer.flush()?;
+        file_writer.flush()?;
     }
 
     // todo: last iteration
@@ -273,7 +273,7 @@ pub fn download_piece(
     }
 
     file_writer.write_all(msg.payload.expect("Expected to have some payload"))?;
-    // file_writer.flush()?;
+    file_writer.flush()?;
 
     // let peer = &peers[1];
     // let peer = handshake(peer, &info_hash)?;
