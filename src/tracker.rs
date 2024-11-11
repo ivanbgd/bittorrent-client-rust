@@ -54,7 +54,7 @@ pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
     // Currently, only the single-file torrents are supported.
     let &left = match mode {
         Mode::SingleFile { length } => length,
-        Mode::MultipleFile { files: _ } => unimplemented!(),
+        Mode::MultipleFile { files: _ } => unimplemented!("Multiple file mode"),
     };
 
     let client = reqwest::blocking::Client::new();

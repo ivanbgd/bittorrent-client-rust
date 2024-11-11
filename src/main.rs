@@ -41,7 +41,7 @@ async fn main() -> Result<(), String> {
             torrent,
             piece_index,
         } => {
-            download_piece(output, torrent, *piece_index).map_err(ae2s)?;
+            download_piece(output, torrent, *piece_index)?;
         }
     }
 

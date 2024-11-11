@@ -3,6 +3,8 @@
 //! Error types and helper functions used in the application
 
 use std::array::TryFromSliceError;
+use std::num::TryFromIntError;
+
 use thiserror::Error;
 
 use crate::message::MessageId;
@@ -59,6 +61,9 @@ pub enum PeerError {
 
     #[error("Wrong message ID: {0}; expected {1}")]
     WrongMessageId(MessageId, MessageId),
+
+    #[error(transparent)]
+    TryFromIntError(#[from] TryFromIntError),
 
     #[error(transparent)]
     Other(anyhow::Error),

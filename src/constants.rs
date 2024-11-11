@@ -57,7 +57,7 @@ pub const KEEP_ALIVE_PERIOD_SECS: u64 = 120;
 /// Maximal size of a piece in bytes, 64 kB
 pub const MAX_PIECE_SIZE: u32 = 1 << 16;
 /// Size of a block (sub-piece) in bytes, 16 kB
-pub const BLOCK_SIZE: u32 = 1 << 14;
+pub const BLOCK_SIZE: usize = 1 << 14;
 
 /// Maximal number of requests pipelined at once
 pub const MAX_PIPELINED_REQUESTS: u8 = 5;
