@@ -62,6 +62,9 @@ pub enum PeerError {
     #[error("Wrong message ID: {0}; expected {1}")]
     WrongMessageId(MessageId, MessageId),
 
+    #[error("Wrong piece index: {0}; expected index < {1}")]
+    WrongPieceIndex(usize, usize),
+
     #[error(transparent)]
     TryFromIntError(#[from] TryFromIntError),
 
