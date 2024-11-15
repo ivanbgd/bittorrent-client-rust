@@ -26,6 +26,7 @@
 //! `$ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
 
 use std::fs::File;
+// use std::fs::OpenOptions;
 use std::io::{BufWriter, Read, Write};
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
@@ -96,6 +97,7 @@ pub fn download_piece(
     piece_index: usize,
 ) -> Result<(), PeerError> {
     let output = File::create(output)?;
+    // let output = OpenOptions::new().append(true).create(true).open(output)?;
     let mut file_writer = BufWriter::new(output);
 
     // Perform the tracker GET request to get a list of peers
@@ -184,11 +186,12 @@ pub fn download_piece(
     }
     let is_last_piece = piece_index == num_pcs - 1;
 
-    eprintln!("file_len = {}", file_len); // todo remove
-    eprintln!("piece_len = {}", piece_len); // todo remove
-    eprintln!("last_piece_len = {}", last_piece_len); // todo remove
-    eprintln!("num_pcs = {}", num_pcs); // todo remove
-    eprintln!("is_last_piece = {}", is_last_piece); // todo remove
+    eprintln!("piece_index = {}", piece_index);
+    eprintln!("file_len = {}", file_len);
+    eprintln!("piece_len = {}", piece_len);
+    eprintln!("last_piece_len = {}", last_piece_len);
+    eprintln!("num_pcs = {}", num_pcs);
+    eprintln!("is_last_piece = {}", is_last_piece);
 
     if piece_index >= num_pcs {
         return Err(PeerError::WrongPieceIndex(piece_index, num_pcs));
@@ -209,20 +212,30 @@ pub fn download_piece(
         num_blocks_per_piece = num_blocks_in_last_piece;
     }
 
-    eprintln!("block_len = {}", block_len); // todo remove
-    eprintln!("num_blocks_per_piece = {}", num_blocks_per_piece); // todo remove
-    eprintln!("num_blocks_in_last_piece = {}", num_blocks_in_last_piece); // todo remove
-    eprintln!("last_block_len = {}", last_block_len); // todo remove
-    eprintln!("total_num_blocks = {}", total_num_blocks); // todo remove
+    eprintln!("block_len = {}", block_len);
+    eprintln!("num_blocks_per_piece = {}", num_blocks_per_piece);
+    eprintln!("num_blocks_in_last_piece = {}", num_blocks_in_last_piece);
+    eprintln!("last_block_len = {}", last_block_len);
+    eprintln!("total_num_blocks = {}", total_num_blocks);
 
     // Send a Request message for each block
     // Again, we don't request pieces but blocks.
     let index = piece_index as u32;
-    for i in 0..num_blocks_per_piece - 1 {
-        eprintln!("i = {}", i); // todo remove
-                                // let begin = u32::try_from(block_len << i)?;
+    for i in 0..num_blocks_per_piece - 0 {
+        // let begin = u32::try_from(block_len << i)?;
         let begin = u32::try_from(i * block_len)?;
-        let length = block_len as u32;
+        // let length = block_len as u32;
+        let length = if !is_last_piece {
+            block_len
+        } else if i < num_blocks_per_piece - 1 {
+            block_len
+        } else {
+            last_block_len
+        } as u32;
+        eprintln!(
+            "i = {}: index = {}, begin = {}, length = {}",
+            i, index, begin, length
+        );
         let tmp =
             <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
         // let tmp: Vec<u8> = RequestPayload::new(index, begin, length).into();
@@ -232,16 +245,21 @@ pub fn download_piece(
             Some(&tmp),
         );
         let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
-        eprintln!("{:?}", msg); // todo remove
+        eprintln!("send: {:?}", msg); // todo remove
         stream.write_all(&msg)?;
         // tmp.clear();
 
         // Wait for a Piece message for each block we've requested
         // let mut buf = [0u8; 4 + 1 + 8 + BLOCK_SIZE];
-        let mut buf = vec![0u8; 4 + 1 + 8 + BLOCK_SIZE];
+        let mut buf = vec![0u8; (4 + 1 + 8 + length) as usize];
         // let read = stream.read(&mut buf)?;
-        let read = stream.read_exact(&mut buf)?;
-        eprintln!("{:?}, {:?}", read, &buf[..13]); // todo remove
+        let read = stream.read_exact(&mut buf)?; // todo: ()
+        eprintln!(
+            "receive: {:?}, {:?}, payload len = {}",
+            read,
+            &buf[..13],
+            &buf[13..].len()
+        ); // todo remove
         let msg: Message = (&buf[..]).into();
         // eprintln!("{:?} {}", msg, msg.id); //todo remove
         if msg.id != MessageId::Piece {
@@ -249,34 +267,41 @@ pub fn download_piece(
         }
 
         file_writer.write_all(&msg.payload.expect("Expected to have some payload")[8..])?;
-        file_writer.flush()?;
+        // output.flush()?;
+        // file_writer.flush()?;
     }
 
-    // todo: last iteration
-    // Last iteration
-    let i = num_blocks_per_piece - 1;
-    eprintln!("i = {}", i); // todo remove
-    let begin = u32::try_from(i * block_len)?;
-    let length = last_block_len as u32;
-    let tmp = <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
-    let msg = Message::new(MessageId::Request, Some(&tmp));
-    let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
-    eprintln!("{:?}", msg); // todo remove
-    stream.write_all(&msg)?;
-    // Wait for a Piece message for the last block we've requested
-    // let mut buf = [0u8; 4 + 1 + 8 + BLOCK_SIZE];
-    let mut buf = vec![0u8; 4 + 1 + 8 + last_block_len];
-    // let read = stream.read(&mut buf)?;
-    let read = stream.read_exact(&mut buf)?;
-    eprintln!("{:?}, {:?}", read, &buf[..13]); // todo remove
-    let msg: Message = (&buf[..]).into();
-    // eprintln!("{:?} {}", msg, msg.id); //todo remove
-    if msg.id != MessageId::Piece {
-        return Err(PeerError::from((msg.id, MessageId::Piece)));
-    }
+    // // Last iteration
+    // let i = num_blocks_per_piece - 1;
+    // eprintln!("i = {}", i); // todo remove
+    // let begin = u32::try_from(i * block_len)?;
+    // let length = last_block_len as u32;
+    // let tmp = <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
+    // let msg = Message::new(MessageId::Request, Some(&tmp));
+    // let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+    // eprintln!("{:?}", msg); // todo remove
+    // stream.write_all(&msg)?;
+    // // Wait for a Piece message for the last block we've requested
+    // // let mut buf = [0u8; 4 + 1 + 8 + BLOCK_SIZE];
+    // let mut buf = vec![0u8; 4 + 1 + 8 + last_block_len];
+    // // let read = stream.read(&mut buf)?;
+    // let read = stream.read_exact(&mut buf)?; // todo: ()
+    // eprintln!("{:?}, {:?}", read, &buf[..13]); // todo remove
+    // let msg: Message = (&buf[..]).into();
+    // // eprintln!("{:?} {}", msg, msg.id); //todo remove
+    // if msg.id != MessageId::Piece {
+    //     return Err(PeerError::from((msg.id, MessageId::Piece)));
+    // }
+    //
+    // file_writer.write_all(&msg.payload.expect("Expected to have some payload")[8..])?;
 
-    file_writer.write_all(&msg.payload.expect("Expected to have some payload")[8..])?;
-    file_writer.flush()?;
+    // Hash-check the piece
+    let piece = info.pieces.0[piece_index];
+    eprintln!("{:?}", piece); //todo remove
+                              // let hash = file_writer.buffer();
+                              // eprintln!("{:?} {:?}", piece, hash); //todo remove
+                              //
+                              // file_writer.flush()?;
 
     // let peer = &peers[1];
     // let peer = handshake(peer, &info_hash)?;

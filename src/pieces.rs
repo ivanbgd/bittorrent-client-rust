@@ -14,6 +14,8 @@ use crate::constants::SHA1_LEN;
 ///
 /// A string whose length is a multiple of 20. It is to be subdivided into strings of length 20,
 /// each of which is the SHA1 hash of the piece at the corresponding index.
+///
+/// Implemented as vector of 20-byte arrays.
 #[derive(Debug)]
 pub struct Pieces(pub Vec<[u8; SHA1_LEN]>);
 
