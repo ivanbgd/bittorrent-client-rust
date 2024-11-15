@@ -33,6 +33,7 @@ use std::path::PathBuf;
 // use std::sync::OnceLock;
 
 use anyhow::Result;
+use sha1::{Digest, Sha1};
 
 use crate::constants::{BLOCK_SIZE, DEF_MSG_LEN, SHA1_LEN};
 use crate::errors::PeerError;
@@ -127,8 +128,6 @@ pub fn download_piece(
     // An alternative might be to have methods for sending and receiving messages.
     // This note stands as a reminder in case we sometime decide to improve performance.
 
-    // Another thing we could consider is to use `stream.read_exact()` when receiving messages.
-
     // Receive a Bitfield message
     // let mut msg_len = [0u8; 4];
     // stream.read_exact(&mut msg_len)?;
@@ -137,6 +136,7 @@ pub fn download_piece(
     // stream.read_exact(&mut buf)?;
     // eprintln!("{}, {:?}", msg_len, buf); // todo remove
 
+    // Receive a Bitfield message
     // let mut buf = [0u8; DEF_MSG_LEN]; // todo remove
     let read = stream.read(&mut buf)?;
     eprintln!("{}, {:?}", read, buf); // todo remove
@@ -218,20 +218,17 @@ pub fn download_piece(
     eprintln!("last_block_len = {}", last_block_len);
     eprintln!("total_num_blocks = {}", total_num_blocks);
 
+    let mut hasher = Sha1::new();
+
     // Send a Request message for each block
     // Again, we don't request pieces but blocks.
     let index = piece_index as u32;
-    for i in 0..num_blocks_per_piece - 0 {
-        // let begin = u32::try_from(block_len << i)?;
+    let mut length = block_len as u32;
+    for i in 0..num_blocks_per_piece {
         let begin = u32::try_from(i * block_len)?;
-        // let length = block_len as u32;
-        let length = if !is_last_piece {
-            block_len
-        } else if i < num_blocks_per_piece - 1 {
-            block_len
-        } else {
-            last_block_len
-        } as u32;
+        if is_last_piece && i == num_blocks_per_piece - 1 {
+            length = last_block_len as u32;
+        }
         eprintln!(
             "i = {}: index = {}, begin = {}, length = {}",
             i, index, begin, length
@@ -266,42 +263,20 @@ pub fn download_piece(
             return Err(PeerError::from((msg.id, MessageId::Piece)));
         }
 
-        file_writer.write_all(&msg.payload.expect("Expected to have some payload")[8..])?;
-        // output.flush()?;
-        // file_writer.flush()?;
+        let payload = &msg.payload.expect("Expected to have some payload received")[8..];
+        hasher.update(payload);
+        file_writer.write_all(payload)?;
     }
 
-    // // Last iteration
-    // let i = num_blocks_per_piece - 1;
-    // eprintln!("i = {}", i); // todo remove
-    // let begin = u32::try_from(i * block_len)?;
-    // let length = last_block_len as u32;
-    // let tmp = <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
-    // let msg = Message::new(MessageId::Request, Some(&tmp));
-    // let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
-    // eprintln!("{:?}", msg); // todo remove
-    // stream.write_all(&msg)?;
-    // // Wait for a Piece message for the last block we've requested
-    // // let mut buf = [0u8; 4 + 1 + 8 + BLOCK_SIZE];
-    // let mut buf = vec![0u8; 4 + 1 + 8 + last_block_len];
-    // // let read = stream.read(&mut buf)?;
-    // let read = stream.read_exact(&mut buf)?; // todo: ()
-    // eprintln!("{:?}, {:?}", read, &buf[..13]); // todo remove
-    // let msg: Message = (&buf[..]).into();
-    // // eprintln!("{:?} {}", msg, msg.id); //todo remove
-    // if msg.id != MessageId::Piece {
-    //     return Err(PeerError::from((msg.id, MessageId::Piece)));
-    // }
-    //
-    // file_writer.write_all(&msg.payload.expect("Expected to have some payload")[8..])?;
-
     // Hash-check the piece
-    let piece = info.pieces.0[piece_index];
-    eprintln!("{:?}", piece); //todo remove
-                              // let hash = file_writer.buffer();
-                              // eprintln!("{:?} {:?}", piece, hash); //todo remove
-                              //
-                              // file_writer.flush()?;
+    let piece = hex::encode(info.pieces.0[piece_index]);
+    let hash = hex::encode(hasher.finalize());
+    eprintln!("{:?} {:?}", piece, hash); //todo remove
+    if piece != hash {
+        return Err(PeerError::HashMismatch(piece, hash));
+    }
+
+    file_writer.flush()?;
 
     // let peer = &peers[1];
     // let peer = handshake(peer, &info_hash)?;

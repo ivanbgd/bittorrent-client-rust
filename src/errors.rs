@@ -68,6 +68,9 @@ pub enum PeerError {
     #[error(transparent)]
     TryFromIntError(#[from] TryFromIntError),
 
+    #[error("Hash mismatch: expected {0}, calculated {1}")]
+    HashMismatch(String, String),
+
     #[error(transparent)]
     Other(anyhow::Error),
 }
