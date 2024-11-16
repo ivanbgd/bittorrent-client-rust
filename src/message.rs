@@ -110,18 +110,6 @@ impl Display for MessageId {
 impl From<MessageId> for u8 {
     fn from(value: MessageId) -> u8 {
         value as u8
-        // match value {
-        //     MessageId::Choke => 0,
-        //     MessageId::Unchoke => 1,
-        //     MessageId::Interested => 2,
-        //     MessageId::NotInterested => 3,
-        //     MessageId::Have => 4,
-        //     MessageId::Bitfield => 5,
-        //     MessageId::Request => 6,
-        //     MessageId::Piece => 7,
-        //     MessageId::Cancel => 8,
-        //     MessageId::Port => 9,
-        // }
     }
 }
 
@@ -154,20 +142,20 @@ impl From<u8> for MessageId {
 /// There is no message ID and no payload for it.
 #[derive(Debug)]
 pub struct Message<'a> {
-    // pub struct Message {
+    // pub struct Message { // todo remove
     len: u32,
     pub id: MessageId,
     pub payload: Option<&'a [u8]>,
-    // payload: Option<Vec<u8>>,
+    // payload: Option<Vec<u8>>, // todo remove
 }
 
 impl<'a> Message<'a> {
-    // impl Message {
+    // impl Message { // todo remove
     /// Creates a new message consisting of message length, type and payload for sending to a peer.
     pub fn new(id: MessageId, payload: Option<&'a [u8]>) -> Self {
-        // pub fn new(id: MessageId, payload: Option<Vec<u8>>) -> Self {
+        // pub fn new(id: MessageId, payload: Option<Vec<u8>>) -> Self { // todo remove
         let payload_len = payload.unwrap_or_default().len();
-        // let payload_len = payload.as_ref().unwrap_or(&vec![]).len();
+        // let payload_len = payload.as_ref().unwrap_or(&vec![]).len(); // todo remove
         let len = 1 + payload_len as u32;
         // eprintln!("pay len 1 = {}", payload_len); // todo remove
 
@@ -177,14 +165,14 @@ impl<'a> Message<'a> {
 
 /// Converts a [`Message`] into a byte stream.
 impl<'a> From<Message<'a>> for Vec<u8> {
-    // impl From<Message> for Vec<u8> {
+    // impl From<Message> for Vec<u8> { // todo remove
     /// Serializes a [`Message`] for a send transfer over the wire.
     fn from(val: Message<'a>) -> Vec<u8> {
-        // fn from(val: Message) -> Vec<u8> {
+        // fn from(val: Message) -> Vec<u8> { // todo remove
         let len = u32::to_be_bytes(val.len);
         let id = val.id.into();
         // eprintln!("len = {:?}, {}", len, val.len); // todo remove
-        // let payload = match val.payload {
+        // let payload = match val.payload { // todo remove
         //     Some(payload) => payload,
         //     None => &[0u8; 0],
         // };
@@ -205,10 +193,10 @@ impl<'a> From<Message<'a>> for Vec<u8> {
 
 /// Converts a byte stream into a [`Message`].
 impl<'a> From<&'a [u8]> for Message<'a> {
-    // impl From<Vec<u8>> for Message {
+    // impl From<Vec<u8>> for Message { // todo remove
     /// Deserializes a [`Message`] received from a wire transfer.
     fn from(value: &'a [u8]) -> Message {
-        // fn from(value: Vec<u8>) -> Message {
+        // fn from(value: Vec<u8>) -> Message { // todo remove
         let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).unwrap_or_else(|_| {
             panic!(
                 "Failed to deserialize message length; received: {:?}",
@@ -220,7 +208,7 @@ impl<'a> From<&'a [u8]> for Message<'a> {
             None
         } else {
             Some(&value[5..4 + len as usize])
-            // Some(value[5..4 + len as usize].to_vec())
+            // Some(value[5..4 + len as usize].to_vec()) // todo remove
         };
 
         Self { len, id, payload }
@@ -264,6 +252,7 @@ impl From<RequestPayload> for Vec<u8> {
     }
 }
 
+// todo remove
 // /// Converts a [`RequestPayload`] into a byte stream.
 // impl<'a> From<RequestPayload> for &'a [u8] {
 //     /// Serializes a [`RequestPayload`] for a send transfer over the wire.
@@ -276,19 +265,6 @@ impl From<RequestPayload> for Vec<u8> {
 //     }
 // }
 
-// DOESN'T COMPILE, NATURALLY
-// /// Converts a [`RequestPayload`] into a byte stream.
-// impl<'a> From<RequestPayload> for &'a [u8] {
-//     /// Serializes a [`RequestPayload`] for a send transfer over the wire.
-//     fn from(value: RequestPayload) -> &'a [u8] {
-//         let mut buf = [0u8; 12];
-//         buf.copy_from_slice(&u32::to_be_bytes(value.index));
-//         buf.copy_from_slice(&u32::to_be_bytes(value.begin));
-//         buf.copy_from_slice(&u32::to_be_bytes(value.length));
-//         buf
-//     }
-// }
-
 /// Payload for the [`MessageId::Piece`] message
 ///
 /// The payload contains the following information:
@@ -297,9 +273,9 @@ impl From<RequestPayload> for Vec<u8> {
 ///   - block: block of data, which is a subset of the piece specified by index
 #[derive(Debug)]
 pub struct PiecePayload<'a> {
-    index: u32,
-    begin: u32,
-    block: &'a [u8],
+    _index: u32,
+    _begin: u32,
+    _block: &'a [u8],
 }
 
 impl<'a> PiecePayload<'a> {
@@ -307,9 +283,9 @@ impl<'a> PiecePayload<'a> {
     /// and block of data from a message received from a peer.
     pub fn new(index: u32, begin: u32, block: &'a [u8]) -> Self {
         Self {
-            index,
-            begin,
-            block,
+            _index: index,
+            _begin: begin,
+            _block: block,
         }
     }
 }
@@ -326,9 +302,9 @@ impl<'a> From<&'a [u8]> for PiecePayload<'a> {
         let block = &value[8..];
 
         Self {
-            index,
-            begin,
-            block,
+            _index: index,
+            _begin: begin,
+            _block: block,
         }
     }
 }
