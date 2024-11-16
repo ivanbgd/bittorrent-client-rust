@@ -86,12 +86,12 @@ impl Peer {
     }
 
     /// Send a message to a peer
-    pub(crate) async fn send_msg<'a>(&mut self, msg: Message<'a>) -> Result<(), PeerError> {
+    pub(crate) async fn _send_msg<'a>(&mut self, msg: Message<'a>) -> Result<(), PeerError> {
         let stream = self
             .stream
             .as_mut()
             .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
-        let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+        let msg = <Vec<u8>>::from(msg);
         stream.write_all(&msg).await?;
         Ok(())
     }
@@ -99,7 +99,7 @@ impl Peer {
     /// Receive a message from a peer: Unchoke, Bitfield, etc.
     ///
     /// Don't use it for [`MessageId::Piece`] messages. Use [`Peer::recv_piece_msg`] for those.
-    pub(crate) async fn recv_msg(
+    pub(crate) async fn _recv_msg(
         &mut self,
         buf: &mut [u8; DEF_MSG_LEN],
     ) -> Result<usize, PeerError> {
@@ -112,7 +112,7 @@ impl Peer {
     }
 
     /// Receive a [`MessageId::Piece`] message from a peer
-    pub(crate) async fn recv_piece_msg(&mut self, length: u32) -> Result<Vec<u8>, PeerError> {
+    pub(crate) async fn _recv_piece_msg(&mut self, length: u32) -> Result<Vec<u8>, PeerError> {
         let mut buf = vec![0u8; length as usize];
         let stream = self
             .stream
