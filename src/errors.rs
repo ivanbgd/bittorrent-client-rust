@@ -68,6 +68,9 @@ pub enum PeerError {
     #[error(transparent)]
     TryFromIntError(#[from] TryFromIntError),
 
+    #[error("Wrong received length: expected {0}, received {1} bytes")]
+    WrongLen(usize, usize),
+
     #[error("Hash mismatch: expected {0}, calculated {1}")]
     HashMismatch(String, String),
 

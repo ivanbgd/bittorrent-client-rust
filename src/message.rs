@@ -169,7 +169,7 @@ impl<'a> Message<'a> {
         let payload_len = payload.unwrap_or_default().len();
         // let payload_len = payload.as_ref().unwrap_or(&vec![]).len();
         let len = 1 + payload_len as u32;
-        eprintln!("pay len 1 = {}", payload_len); // todo remove
+        // eprintln!("pay len 1 = {}", payload_len); // todo remove
 
         Self { len, id, payload }
     }
@@ -183,21 +183,21 @@ impl<'a> From<Message<'a>> for Vec<u8> {
         // fn from(val: Message) -> Vec<u8> {
         let len = u32::to_be_bytes(val.len);
         let id = val.id.into();
-        eprintln!("len = {:?}, {}", len, val.len); // todo remove
-                                                   // let payload = match val.payload {
-                                                   //     Some(payload) => payload,
-                                                   //     None => &[0u8; 0],
-                                                   // };
+        // eprintln!("len = {:?}, {}", len, val.len); // todo remove
+        // let payload = match val.payload {
+        //     Some(payload) => payload,
+        //     None => &[0u8; 0],
+        // };
         let payload = val.payload.unwrap_or_default();
         let payload_len = payload.len();
-        eprintln!("pay len 2 = {}", payload_len); // todo remove
+        // eprintln!("pay len 2 = {}", payload_len); // todo remove
 
         let mut buf = Vec::with_capacity(4 + 1 + payload_len);
 
         buf.extend(len);
         buf.push(id);
         buf.extend(payload);
-        eprintln!("buf len = {}, cap = {}", buf.len(), buf.capacity()); // todo remove
+        // eprintln!("buf len = {}, cap = {}", buf.len(), buf.capacity()); // todo remove
 
         buf
     }

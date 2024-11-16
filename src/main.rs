@@ -33,7 +33,7 @@ async fn main() -> Result<(), String> {
             println!("{}", peers);
         }
         Commands::Handshake { torrent, peer } => {
-            let peer = handshake(peer, &meta_info(torrent)?.info.info_hash)?;
+            let peer = handshake(peer, &meta_info(torrent)?.info.info_hash).await?;
             println!("Peer ID: {}", peer);
         }
         Commands::DownloadPiece {
@@ -41,7 +41,7 @@ async fn main() -> Result<(), String> {
             torrent,
             piece_index,
         } => {
-            download_piece(output, torrent, *piece_index)?;
+            download_piece(output, torrent, *piece_index).await?;
         }
     }
 

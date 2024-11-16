@@ -3,10 +3,11 @@
 //! Peer data structure for easier work with multiple peers at once
 
 use std::fmt::{Display, Formatter};
-use std::io::{Read, Write};
-use std::net::{SocketAddrV4, TcpStream};
+use std::net::SocketAddrV4;
 
 use anyhow::Result;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 use crate::constants::*;
 use crate::errors::PeerError;
@@ -52,7 +53,7 @@ impl Peer {
     /// Tries to connect to the peer; sets the `stream` field if it succeeds.
     ///
     /// Also sets the 20 bytes long SHA1 representation of the `peer_id` received during a successful handshake.
-    pub(crate) fn handshake(&mut self, info_hash: &[u8; SHA1_LEN]) -> Result<(), PeerError> {
+    pub(crate) async fn handshake(&mut self, info_hash: &[u8; SHA1_LEN]) -> Result<(), PeerError> {
         let mut buf = [0u8; HANDSHAKE_MSG_LEN];
         buf[0] = BT_PROTO_LEN as u8;
         buf[BT_PROTOCOL_RANGE].copy_from_slice(BT_PROTOCOL.as_bytes());
@@ -60,18 +61,18 @@ impl Peer {
         buf[INFO_HASH_RANGE].copy_from_slice(info_hash);
         buf[PEER_ID_RANGE].copy_from_slice(PEER_ID.as_bytes());
 
-        let mut stream = TcpStream::connect(self.addr)?;
+        let mut stream = TcpStream::connect(self.addr).await?;
 
-        let written = stream.write(&buf)?;
+        let written = stream.write(&buf).await?;
         assert_eq!(HANDSHAKE_MSG_LEN, written);
 
-        stream.read_exact(&mut buf)?;
+        stream.read_exact(&mut buf).await?;
         if (&buf[BT_PROTOCOL_RANGE] == BT_PROTOCOL.as_bytes())
             && (&buf[INFO_HASH_RANGE] == info_hash)
         {
             let peer_id = &buf[(HANDSHAKE_MSG_LEN - SHA1_LEN)..HANDSHAKE_MSG_LEN];
             self.peer_id = Some(<[u8; SHA1_LEN]>::try_from(peer_id)?);
-            eprintln!("hs peer_id: {peer_id:?}"); //todo
+            // eprintln!("hs peer_id: {peer_id:?}"); //todo rem
         } else {
             return Err(PeerError::HandshakeError(format!(
                 "received handshake parameters from peer {} don't match the sent parameters",
@@ -86,7 +87,7 @@ impl Peer {
 
     // TODO
     /// Receive a message from a peer
-    pub(crate) fn _recv_msg(&mut self) -> Result<()> {
+    pub(crate) fn recv_msg(&mut self) -> Result<()> {
         // let _ = self.stream.as_mut().unwrap().write(&[0u8; 1])?;
         Ok(())
     }

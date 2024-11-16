@@ -60,4 +60,4 @@ pub const MAX_PIECE_SIZE: u32 = 1 << 16;
 pub const BLOCK_SIZE: usize = 1 << 14;
 
 /// Maximal number of requests pipelined at once
-pub const MAX_PIPELINED_REQUESTS: u8 = 5;
+pub const MAX_PIPELINED_REQUESTS: usize = 5;

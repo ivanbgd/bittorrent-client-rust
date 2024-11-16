@@ -47,7 +47,7 @@ pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
 
     // The 20 byte sha1 hash of the bencoded form of the info value from the metainfo file.
     // This value will almost certainly have to be escaped.
-    let info_hash = url_encode(&info_hash_hex);
+    let info_hash = url_encode(info_hash_hex);
 
     let mode = &meta.info.mode;
 

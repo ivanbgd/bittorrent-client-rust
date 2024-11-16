@@ -25,17 +25,21 @@
 //!
 //! `$ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
 
-use std::fs::File;
+use std::cmp::min;
+// use std::fs::File;
 // use std::fs::OpenOptions;
-use std::io::{BufWriter, Read, Write};
+// use std::io::{BufWriter, Write};
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 // use std::sync::OnceLock;
 
 use anyhow::Result;
 use sha1::{Digest, Sha1};
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::net::TcpStream;
 
-use crate::constants::{BLOCK_SIZE, DEF_MSG_LEN, SHA1_LEN};
+use crate::constants::{BLOCK_SIZE, DEF_MSG_LEN, MAX_PIPELINED_REQUESTS, SHA1_LEN};
 use crate::errors::PeerError;
 use crate::message::{Message, MessageId, RequestPayload};
 use crate::meta_info::Mode;
@@ -64,15 +68,15 @@ use crate::tracker::get_peers;
 /// `Peer ID: 0102030405060708090a0b0c0d0e0f1011121314`
 ///
 /// Exact value will be different as it is randomly generated.
-pub fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Result<Peer, PeerError> {
+pub async fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Result<Peer, PeerError> {
     // let info_hash = INFO_HASH
     //     .get_or_init(|| Ok(meta_info(torrent)?.info.info_hash))
     //     .as_ref()
     //     .expect("info hash should be available at this point");
 
     let mut peer = Peer::new(peer);
-    peer.handshake(info_hash)?;
-    eprintln!("hs peer: {peer}"); //todo remove
+    peer.handshake(info_hash).await?;
+    //eprintln!("hs peer: {peer}"); //todo remove
 
     Ok(peer)
 }
@@ -87,84 +91,30 @@ pub fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Result<Peer
 /// The last piece can be smaller than other pieces which are of same fixed size that
 /// is defined in the torrent file.
 ///
+/// Pieces are split into blocks of 16 kB or potentially less in case of the very last block,
+/// and transferred as such. The blocks are assembled into a full piece when all of them
+/// have been received.
+///
 /// Supports multiple peers. This improves download speeds because it pipelines requests
 /// and avoids delays between blocks being sent to us from the peers. Source (PDF):
 /// [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf)
 ///
 /// `$ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
-pub fn download_piece(
+pub async fn download_piece(
     output: &PathBuf,
     torrent: &PathBuf,
     piece_index: usize,
 ) -> Result<(), PeerError> {
-    let output = File::create(output)?;
+    let output = File::create(output).await?;
     // let output = OpenOptions::new().append(true).create(true).open(output)?;
     let mut file_writer = BufWriter::new(output);
 
+    // For validating the hash of the received piece
+    let mut hasher = Sha1::new();
+
     // Perform the tracker GET request to get a list of peers
     let (peers, info) = get_peers(torrent)?;
-    let peers = peers.0;
-
-    // TODO: Create multiple peers and work with them at lower level.
-    // TODO: Perhaps choose (at most) PIPELINED_REQUESTS peers and connect to all of them.
-    let peer = &peers[0];
-    // Establish a TCP connection with a peer, and perform a handshake
-    let peer = handshake(peer, &info.info_hash)?;
-
-    // Exchange messages with the peer
-    let mut stream = peer
-        .stream
-        .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr));
-
-    // A read buffer, for received messages
-    let mut buf = [0u8; DEF_MSG_LEN];
-
-    // Implementation note:
-    // We don't use a write buffer for sending messages.
-    // We instead create messages through their constructor and convert them into a stream of bytes.
-    // We do this to have a cleaner code with greater readability.
-    // Perhaps it would have been slightly more performant if we had used a write buffer directly,
-    // without performing those function calls and conversions, but we chose a nicer-looking code.
-    // An alternative might be to have methods for sending and receiving messages.
-    // This note stands as a reminder in case we sometime decide to improve performance.
-
-    // Receive a Bitfield message
-    // let mut msg_len = [0u8; 4];
-    // stream.read_exact(&mut msg_len)?;
-    // let msg_len = u32::from_be_bytes(msg_len) as usize;
-    // let mut buf = vec![0u8; msg_len];
-    // stream.read_exact(&mut buf)?;
-    // eprintln!("{}, {:?}", msg_len, buf); // todo remove
-
-    // Receive a Bitfield message
-    // let mut buf = [0u8; DEF_MSG_LEN]; // todo remove
-    let read = stream.read(&mut buf)?;
-    eprintln!("{}, {:?}", read, buf); // todo remove
-    let msg: Message = (&buf[..]).into();
-    // let msg: Message = buf[..].to_vec().into(); // todo remove
-    eprintln!("{:?} {}", msg, msg.id); //todo remove
-    if msg.id != MessageId::Bitfield {
-        return Err(PeerError::from((msg.id, MessageId::Bitfield)));
-    }
-
-    // Send the Interested message
-    let msg = Message::new(MessageId::Interested, None);
-    let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
-    eprintln!("{:?}", msg); // todo remove
-    stream.write_all(&msg)?;
-
-    // Receive an Unchoke message
-    // let mut buf = vec![0u8; 5];
-    // stream.read_exact(&mut buf[0..])?;
-    // eprintln!("{:?}", buf); // todo remove
-    let read = stream.read(&mut buf)?;
-    eprintln!("{}, {:?}", read, buf); // todo remove
-    let msg = Message::from(&buf[..]);
-    // let msg = Message::from(buf[..].to_vec()); // todo remove
-    eprintln!("{:?}", msg); //todo remove
-    if msg.id != MessageId::Unchoke {
-        return Err(PeerError::from((msg.id, MessageId::Unchoke)));
-    }
+    let mut peers = peers.0;
 
     // Calculate where the requested piece begins in the file - not needed in this function
     let _piece_begin = piece_index * info.plen;
@@ -218,57 +168,263 @@ pub fn download_piece(
     eprintln!("last_block_len = {}", last_block_len);
     eprintln!("total_num_blocks = {}", total_num_blocks);
 
-    let mut hasher = Sha1::new();
+    // Support working with multiple peers at the same time
+    let mut num_peers = min(MAX_PIPELINED_REQUESTS, num_blocks_per_piece);
+    if is_last_piece {
+        num_peers = num_blocks_in_last_piece;
+    }
+    num_peers = min(peers.len(), num_peers);
+    eprintln!("num_peers = {num_peers}; peers.len() = {}", peers.len()); // todo remove
 
-    // Send a Request message for each block
-    // Again, we don't request pieces but blocks.
-    let index = piece_index as u32;
-    let mut length = block_len as u32;
-    for i in 0..num_blocks_per_piece {
-        let begin = u32::try_from(i * block_len)?;
-        if is_last_piece && i == num_blocks_per_piece - 1 {
-            length = last_block_len as u32;
-        }
-        eprintln!(
-            "i = {}: index = {}, begin = {}, length = {}",
-            i, index, begin, length
-        );
-        let tmp =
-            <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
-        // let tmp: Vec<u8> = RequestPayload::new(index, begin, length).into();
-        let msg = Message::new(
-            MessageId::Request,
-            // Some(RequestPayload::new(index, begin, length).into()),
-            Some(&tmp),
-        );
-        let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
-        eprintln!("send: {:?}", msg); // todo remove
-        stream.write_all(&msg)?;
-        // tmp.clear();
+    // let mut work_peers: Vec<Peer> = Vec::with_capacity(num_peers);
+    let mut streams: Vec<TcpStream> = Vec::with_capacity(num_peers);
 
-        // Wait for a Piece message for each block we've requested
-        // let mut buf = [0u8; 4 + 1 + 8 + BLOCK_SIZE];
-        let mut buf = vec![0u8; (4 + 1 + 8 + length) as usize];
-        // let read = stream.read(&mut buf)?;
-        let read = stream.read_exact(&mut buf)?; // todo: ()
-        eprintln!(
-            "receive: {:?}, {:?}, payload len = {}",
-            read,
-            &buf[..13],
-            &buf[13..].len()
-        ); // todo remove
+    // Get all peers to work with - handshake with them and store their streams
+    for (peer_idx, &mut ref mut peer) in peers.iter_mut().enumerate().take(num_peers) {
+        // Establish a TCP connection with a peer, and perform a handshake
+        let peer = handshake(peer, &info.info_hash).await?;
+
+        eprintln!("HS with peer_idx {peer_idx}: {}", peer.addr); // todo remove
+
+        // work_peers.push(peer); // todo remove
+
+        let mut stream: TcpStream = peer
+            .stream
+            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr));
+
+        // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
+
+        // A read buffer, for received messages
+        let mut buf = [0u8; DEF_MSG_LEN];
+
+        // Receive a Bitfield message
+        let _read = stream.read(&mut buf).await?;
+        // eprintln!("01 {peer_idx}: {}, {:?}", read, buf); // todo remove
         let msg: Message = (&buf[..]).into();
-        // eprintln!("{:?} {}", msg, msg.id); //todo remove
-        if msg.id != MessageId::Piece {
-            return Err(PeerError::from((msg.id, MessageId::Piece)));
+        // let msg: Message = buf[..].to_vec().into(); // todo remove
+        eprintln!("01 peer_idx {peer_idx}: {:?} {}", msg, msg.id); //todo remove
+        if msg.id != MessageId::Bitfield {
+            return Err(PeerError::from((msg.id, MessageId::Bitfield)));
         }
 
-        let payload = &msg.payload.expect("Expected to have some payload received")[8..];
-        hasher.update(payload);
-        file_writer.write_all(payload)?;
+        // Send the Interested message
+        let msg = Message::new(MessageId::Interested, None);
+        let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+        eprintln!("02 peer_idx {peer_idx}: {:?}", msg); // todo remove
+        stream.write_all(&msg).await?;
+
+        // Receive an Unchoke message
+        // let mut buf = vec![0u8; 5];
+        // stream.read_exact(&mut buf[0..])?;
+        // eprintln!("{:?}", buf); // todo remove
+        let read = stream.read(&mut buf).await?;
+        // eprintln!("04 {peer_idx}: {}, {:?}", read, buf); // todo remove
+        let msg = Message::from(&buf[..]);
+        // let msg = Message::from(buf[..].to_vec()); // todo remove
+        eprintln!("03 peer_idx {peer_idx}: {:?}", msg); //todo remove
+        if read != 5 {
+            return Err(PeerError::WrongLen(5, read));
+        }
+        if msg.id != MessageId::Unchoke {
+            return Err(PeerError::from((msg.id, MessageId::Unchoke)));
+        }
+
+        streams.push(stream);
     }
 
-    // Hash-check the piece
+    let block_iters = num_blocks_per_piece / streams.len() + num_blocks_per_piece % streams.len();
+
+    eprintln!("streams.len() = {}", streams.len()); //todo remove
+    eprintln!("block_iters = {block_iters}",); //todo remove
+    eprintln!("******************************************"); //todo remove
+    let mut i = 0usize;
+
+    // Fetch blocks from peers
+
+    // Outer loop is by blocks, while the inner loop is by peers.
+    // I am not sure that this brings any speed improvement; it might.
+    'outer: for block_idx in 0..block_iters {
+        for (peer_idx, stream) in streams.iter_mut().enumerate().take(num_peers) {
+            // let i = block_idx * peer_idx + block_idx;
+            eprintln!("10 block_idx = {block_idx}, peer_idx = {peer_idx}, i = {i}"); // todo remove
+
+            // Exchange messages with the peer
+            //
+            // Implementation note:
+            // We don't use a write buffer for sending messages.
+            // We instead create messages through their constructor and convert them into a stream of bytes.
+            // We do this to have a cleaner code with greater readability.
+            // Perhaps it would have been slightly more performant if we had used a write buffer directly,
+            // without performing those function calls and conversions, but we chose a nicer-looking code.
+            // An alternative might be to have methods for sending and receiving messages.
+            // This note stands as a reminder in case we sometime decide to improve performance.
+
+            // Send a Request message for each block - we don't request pieces but blocks.
+            let index = piece_index as u32;
+            let begin = u32::try_from(i * block_len)?;
+            let mut length = block_len as u32;
+            if is_last_piece && i == num_blocks_per_piece - 1 {
+                length = last_block_len as u32;
+            }
+            eprintln!("i = {i}: index = {index}, begin = {begin}, length = {length}");
+            let tmp =
+                <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
+            // let tmp: Vec<u8> = RequestPayload::new(index, begin, length).into();
+            let msg = Message::new(
+                MessageId::Request,
+                // Some(RequestPayload::new(index, begin, length).into()),
+                Some(&tmp),
+            );
+            let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+            eprintln!(
+                "11 block_idx = {block_idx}, peer_idx = {peer_idx}, i = {i}; send: {:?}",
+                msg
+            ); // todo remove
+            stream.write_all(&msg).await?;
+
+            // Wait for a Piece message for each block we've requested
+            let mut buf = vec![0u8; (4 + 1 + 8 + length) as usize];
+            stream.read_exact(&mut buf).await?;
+            eprintln!(
+                "12 block_idx = {block_idx}, peer_idx = {peer_idx}, i = {i}; receive: {:?}, payload len = {}",
+                &buf[..13],
+                &buf[13..].len()
+            ); // todo remove
+            let msg: Message = (&buf[..]).into();
+            // eprintln!("{:?} {}", msg, msg.id); //todo remove
+            if msg.id != MessageId::Piece {
+                return Err(PeerError::from((msg.id, MessageId::Piece)));
+            }
+
+            let payload = &msg.payload.expect("Expected to have some payload received")[8..];
+            hasher.update(payload); // todo: is it thread-safe (atomic)?
+            file_writer.write_all(payload).await?; // todo: is it thread-safe (atomic)?
+
+            i += 1;
+            if i == num_blocks_per_piece {
+                eprintln!("******************************************"); //todo remove
+                break 'outer;
+            }
+
+            eprintln!("******************************************"); //todo remove
+        }
+    }
+
+    ////////////////////////////
+
+    /*
+    // Fetch blocks from peers
+    // for (peer_idx, &mut ref mut peer) in work_peers.iter_mut().enumerate().take(num_peers) { // todo rem
+    for (peer_idx, stream) in streams.iter_mut().enumerate().take(num_peers) {
+        eprintln!("****** 00 peer_idx: {peer_idx}"); // todo remove
+
+        // Exchange messages with the peer
+        //
+        // Implementation note:
+        // We don't use a write buffer for sending messages.
+        // We instead create messages through their constructor and convert them into a stream of bytes.
+        // We do this to have a cleaner code with greater readability.
+        // Perhaps it would have been slightly more performant if we had used a write buffer directly,
+        // without performing those function calls and conversions, but we chose a nicer-looking code.
+        // An alternative might be to have methods for sending and receiving messages.
+        // This note stands as a reminder in case we sometime decide to improve performance.
+
+        // let stream: &mut TcpStream = peer
+        //     .stream
+        //     .as_mut()
+        //     .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr)); // todo rem
+
+        // A read buffer, for received messages
+        let mut buf = [0u8; DEF_MSG_LEN];
+
+        // Receive a Bitfield message
+        let read = stream.read(&mut buf).await?;
+        // eprintln!("01 {peer_idx}: {}, {:?}", read, buf); // todo remove
+        let msg: Message = (&buf[..]).into();
+        // let msg: Message = buf[..].to_vec().into(); // todo remove
+        eprintln!("02 {peer_idx}: {:?} {}", msg, msg.id); //todo remove
+        if msg.id != MessageId::Bitfield {
+            return Err(PeerError::from((msg.id, MessageId::Bitfield)));
+        }
+
+        // Send the Interested message
+        let msg = Message::new(MessageId::Interested, None);
+        let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+        eprintln!("03 {peer_idx}: {:?}", msg); // todo remove
+        stream.write_all(&msg).await?;
+
+        // Receive an Unchoke message
+        // let mut buf = vec![0u8; 5];
+        // stream.read_exact(&mut buf[0..])?;
+        // eprintln!("{:?}", buf); // todo remove
+        let read = stream.read(&mut buf).await?;
+        // eprintln!("04 {peer_idx}: {}, {:?}", read, buf); // todo remove
+        let msg = Message::from(&buf[..]);
+        // let msg = Message::from(buf[..].to_vec()); // todo remove
+        eprintln!("05 {peer_idx}: {:?}", msg); //todo remove
+        if msg.id != MessageId::Unchoke {
+            return Err(PeerError::from((msg.id, MessageId::Unchoke)));
+        }
+
+        // Send a Request message for each block
+        // Again, we don't request pieces but blocks.
+        let index = piece_index as u32;
+        let mut length = block_len as u32;
+        // todo: fix - what if num_blocks_per_piece / num_peers is 0?!
+        // for i in 0..num_blocks_per_piece {
+        for i in peer_idx..(num_blocks_per_piece / num_peers) {
+            let i = peer_idx * i; // todo: ?
+            eprintln!("************ 000 peer_idx: {peer_idx}, block idx: {i}"); // todo remove
+
+            let begin = u32::try_from(i * block_len)?;
+            if is_last_piece && i == num_blocks_per_piece - 1 {
+                length = last_block_len as u32;
+            }
+            eprintln!("i = {i}: index = {index}, begin = {begin}, length = {length}");
+            let tmp =
+                <RequestPayload as Into<Vec<u8>>>::into(RequestPayload::new(index, begin, length));
+            // let tmp: Vec<u8> = RequestPayload::new(index, begin, length).into();
+            let msg = Message::new(
+                MessageId::Request,
+                // Some(RequestPayload::new(index, begin, length).into()),
+                Some(&tmp),
+            );
+            let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+            eprintln!("06 {peer_idx}: send: {:?}", msg); // todo remove
+            stream.write_all(&msg).await?;
+            // tmp.clear();
+
+            // Wait for a Piece message for each block we've requested
+            // let mut buf = [0u8; 4 + 1 + 8 + BLOCK_SIZE];
+            let mut buf = vec![0u8; (4 + 1 + 8 + length) as usize];
+            // let read = stream.read(&mut buf)?;
+            stream.read_exact(&mut buf).await?;
+            eprintln!(
+                "07 {peer_idx}: receive: {:?}, payload len = {}",
+                &buf[..13],
+                &buf[13..].len()
+            ); // todo remove
+            let msg: Message = (&buf[..]).into();
+            // eprintln!("{:?} {}", msg, msg.id); //todo remove
+            if msg.id != MessageId::Piece {
+                return Err(PeerError::from((msg.id, MessageId::Piece)));
+            }
+
+            let payload = &msg.payload.expect("Expected to have some payload received")[8..];
+            hasher.update(payload);
+            file_writer.write_all(payload).await?;
+        }
+    }
+    */
+
+    // Receive a Bitfield message
+    // let mut msg_len = [0u8; 4];
+    // stream.read_exact(&mut msg_len)?;
+    // let msg_len = u32::from_be_bytes(msg_len) as usize;
+    // let mut buf = vec![0u8; msg_len];
+    // stream.read_exact(&mut buf)?;
+    // eprintln!("{}, {:?}", msg_len, buf); // todo remove
+
     let piece = hex::encode(info.pieces.0[piece_index]);
     let hash = hex::encode(hasher.finalize());
     eprintln!("{:?} {:?}", piece, hash); //todo remove
@@ -276,7 +432,7 @@ pub fn download_piece(
         return Err(PeerError::HashMismatch(piece, hash));
     }
 
-    file_writer.flush()?;
+    file_writer.flush().await?;
 
     // let peer = &peers[1];
     // let peer = handshake(peer, &info_hash)?;
