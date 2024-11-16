@@ -104,10 +104,7 @@ impl MetaInfo {
 
 impl Display for MetaInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let length = match &self.info.mode {
-            Mode::SingleFile { length } => length,
-            Mode::MultipleFile { files: _ } => unimplemented!("Multiple file mode"),
-        };
+        let length = self.info.length();
 
         let pieces = &self.info.pieces.0;
         let hashes_len = pieces.len() * 2 * SHA1_LEN + pieces.len();
@@ -174,6 +171,17 @@ pub struct Info {
     /// This field is not a part of BitTorrent Specification, but we added it for easier use.
     #[serde(skip)]
     pub info_hash_hex: String,
+}
+
+impl Info {
+    /// Returns total length of all the files in the torrent,
+    /// whether it's a single-file or a multiple-file torrent.
+    pub fn length(&self) -> usize {
+        match &self.mode {
+            Mode::SingleFile { length } => *length,
+            Mode::MultipleFile { files } => files.iter().map(|f| f.length).sum(),
+        }
+    }
 }
 
 /// Single-file or multiple-file torrent

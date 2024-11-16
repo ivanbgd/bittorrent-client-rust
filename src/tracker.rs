@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
 use crate::errors::TrackerError;
-use crate::meta_info::{meta_info, Info, Mode};
+use crate::meta_info::{meta_info, Info};
 use crate::tracker::peers::Peers;
 
 /// Fetches and returns the peers list and the decoded [`Info`] section (dictionary) of the torrent file.
@@ -49,13 +49,8 @@ pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
     // This value will almost certainly have to be escaped.
     let info_hash = url_encode(info_hash_hex);
 
-    let mode = &meta.info.mode;
-
     // Currently, only the single-file torrents are supported.
-    let &left = match mode {
-        Mode::SingleFile { length } => length,
-        Mode::MultipleFile { files: _ } => unimplemented!("Multiple file mode"),
-    };
+    let left = meta.info.length();
 
     let client = reqwest::blocking::Client::new();
 

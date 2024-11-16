@@ -40,7 +40,6 @@ use tokio::net::TcpStream;
 use crate::constants::{BLOCK_SIZE, DEF_MSG_LEN, MAX_PIPELINED_REQUESTS, SHA1_LEN};
 use crate::errors::PeerError;
 use crate::message::{Message, MessageId, RequestPayload};
-use crate::meta_info::Mode;
 use crate::peer::Peer;
 use crate::tracker::get_peers;
 
@@ -121,10 +120,7 @@ pub async fn download_piece(
     // except potentially for the last piece which can be smaller.
     // File ultimately needs to be assembled from received pieces, but this function is not meant for that.
     // The file size is also provided in the torrent file.
-    let file_len = match info.mode {
-        Mode::SingleFile { length } => length,
-        Mode::MultipleFile { .. } => unimplemented!("Multiple file mode"),
-    };
+    let file_len = info.length();
     let piece_len = info.plen;
     let mut last_piece_len = file_len % piece_len;
     let num_pcs = file_len / piece_len + last_piece_len.clamp(0, 1); // not needed in this function
