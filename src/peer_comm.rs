@@ -176,7 +176,8 @@ pub async fn download_piece(
     // let mut work_peers: Vec<Peer> = Vec::with_capacity(num_peers); // todo remove
     let mut streams: Vec<TcpStream> = Vec::with_capacity(num_peers);
 
-    // Get all peers to work with - handshake with them and store their streams
+    // Get all peers to work with - handshake with them and store their streams.
+    // This could be randomized, but it isn't necessary; rather, just an idea.
     for (peer_idx, peer) in peers.iter_mut().enumerate().take(num_peers) {
         // Establish a TCP connection with a peer, and perform a handshake
         let peer = handshake(peer, &info.info_hash).await?;
@@ -212,7 +213,7 @@ pub async fn download_piece(
         let read = stream.read(&mut buf).await?;
         let msg = Message::from(&buf[..]);
         eprintln!("03 peer_idx {peer_idx}: {:?}", msg); //todo remove
-        if read != 5 {
+        if 5 != read {
             return Err(PeerError::WrongLen(5, read));
         }
         if msg.id != MessageId::Unchoke {
@@ -225,11 +226,11 @@ pub async fn download_piece(
     }
 
     let block_iters = num_blocks_per_piece / streams.len() + num_blocks_per_piece % streams.len();
+    let mut i = 0usize;
 
     eprintln!("streams.len() = {}", streams.len()); //todo remove
     eprintln!("block_iters = {block_iters}",); //todo remove
     eprintln!("******************************************"); //todo remove
-    let mut i = 0usize;
 
     // Fetch blocks from peers
 
@@ -275,8 +276,9 @@ pub async fn download_piece(
             stream.write_all(&msg).await?;
 
             // Wait for a Piece message for each block we've requested
-            let mut buf = vec![0u8; (4 + 1 + 8 + length) as usize];
-            stream.read_exact(&mut buf).await?;
+            let size = (4 + 1 + 8 + length) as usize;
+            let mut buf = vec![0u8; size];
+            let read = stream.read_exact(&mut buf).await?;
             eprintln!(
                 "12 block_idx = {block_idx}, peer_idx = {peer_idx}, i = {i}; receive: {:?}, payload len = {}",
                 &buf[..13],
@@ -284,6 +286,9 @@ pub async fn download_piece(
             ); // todo remove
             let msg: Message = (&buf[..]).into();
             // eprintln!("{:?} {}", msg, msg.id); //todo remove
+            if size != read {
+                return Err(PeerError::WrongLen(size, read));
+            }
             if msg.id != MessageId::Piece {
                 return Err(PeerError::from((msg.id, MessageId::Piece)));
             }
@@ -292,11 +297,12 @@ pub async fn download_piece(
             hasher.update(payload); // todo: is it thread-safe (atomic)?
             file_writer.write_all(payload).await?; // todo: is it thread-safe (atomic)?
 
-            i += 1;
-            if i == num_blocks_per_piece {
+            if i == num_blocks_per_piece - 1 {
                 eprintln!("******************************************"); //todo remove
                 break 'outer;
             }
+
+            i += 1;
 
             eprintln!("******************************************"); //todo remove
         }
