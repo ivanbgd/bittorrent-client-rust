@@ -11,6 +11,7 @@ use tokio::net::TcpStream;
 
 use crate::constants::*;
 use crate::errors::PeerError;
+use crate::message::Message;
 
 /// Peer object
 ///
@@ -84,11 +85,41 @@ impl Peer {
         Ok(())
     }
 
-    // TODO
-    /// Receive a message from a peer
-    pub(crate) fn recv_msg(&mut self) -> Result<()> {
-        // let _ = self.stream.as_mut().unwrap().write(&[0u8; 1])?;
+    /// Send a message to a peer
+    pub(crate) async fn send_msg<'a>(&mut self, msg: Message<'a>) -> Result<(), PeerError> {
+        let stream = self
+            .stream
+            .as_mut()
+            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
+        let msg = <Vec<u8>>::from(msg); // Or just: stream.write_all(msg.into())?;
+        stream.write_all(&msg).await?;
         Ok(())
+    }
+
+    /// Receive a message from a peer: Unchoke, Bitfield, etc.
+    ///
+    /// Don't use it for [`MessageId::Piece`] messages. Use [`Peer::recv_piece_msg`] for those.
+    pub(crate) async fn recv_msg(
+        &mut self,
+        buf: &mut [u8; DEF_MSG_LEN],
+    ) -> Result<usize, PeerError> {
+        let stream = self
+            .stream
+            .as_mut()
+            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
+        let read = stream.read(&mut buf[..]).await?;
+        Ok(read)
+    }
+
+    /// Receive a [`MessageId::Piece`] message from a peer
+    pub(crate) async fn recv_piece_msg(&mut self, length: u32) -> Result<Vec<u8>, PeerError> {
+        let mut buf = vec![0u8; length as usize];
+        let stream = self
+            .stream
+            .as_mut()
+            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
+        stream.read_exact(&mut buf).await?;
+        Ok(buf)
     }
 }
 
