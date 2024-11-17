@@ -35,3 +35,7 @@ sha1 = "0.10.1"                                                    # hashing
 tempfile = "3"                                                     # creating temporary directories
 thiserror = "1.0.38"                                               # error handling
 tokio = { version = "1.23.0", features = ["full"] }                # async http requests
+
+# My additions
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-util = { version = "0.7.12", features = ["full"] }

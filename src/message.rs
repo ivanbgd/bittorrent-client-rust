@@ -20,6 +20,13 @@
 
 use std::fmt::{Display, Formatter};
 
+use anyhow::Result;
+use bytes::{Buf, BufMut, BytesMut};
+use tokio_util::codec::{Decoder, Encoder};
+
+use crate::constants::MAX_FRAME_SIZE;
+use crate::errors::MessageCodecError;
+
 /// Message types
 ///
 /// All non-keepalive messages contain a single byte which holds their type.
@@ -141,62 +148,47 @@ impl From<u8> for MessageId {
 /// The keep-alive message is a message with zero bytes, specified with the length prefix set to zero.
 /// There is no message ID and no payload for it.
 #[derive(Debug)]
-pub struct Message<'a> {
-    // pub struct Message { // todo remove
+pub struct Message {
     len: u32,
     pub id: MessageId,
-    pub payload: Option<&'a [u8]>,
-    // payload: Option<Vec<u8>>, // todo remove
+    pub payload: Option<Vec<u8>>,
 }
 
-impl<'a> Message<'a> {
-    // impl Message { // todo remove
-    /// Creates a new message consisting of message length, type and payload for sending to a peer.
-    pub fn new(id: MessageId, payload: Option<&'a [u8]>) -> Self {
-        // pub fn new(id: MessageId, payload: Option<Vec<u8>>) -> Self { // todo remove
-        let payload_len = payload.unwrap_or_default().len();
-        // let payload_len = payload.as_ref().unwrap_or(&vec![]).len(); // todo remove
+impl Message {
+    /// Creates a new message consisting of message length, type (`id`) and payload for sending to a peer.
+    ///
+    /// The message length is calculated automatically and stored in the message.
+    pub fn new(id: MessageId, payload: Option<Vec<u8>>) -> Self {
+        let payload_len = payload.as_ref().unwrap_or(&vec![]).len();
         let len = 1 + payload_len as u32;
-        // eprintln!("pay len 1 = {}", payload_len); // todo remove
 
         Self { len, id, payload }
     }
 }
 
 /// Converts a [`Message`] into a byte stream.
-impl<'a> From<Message<'a>> for Vec<u8> {
-    // impl From<Message> for Vec<u8> { // todo remove
+impl From<Message> for Vec<u8> {
     /// Serializes a [`Message`] for a send transfer over the wire.
-    fn from(val: Message<'a>) -> Vec<u8> {
-        // fn from(val: Message) -> Vec<u8> { // todo remove
+    fn from(val: Message) -> Vec<u8> {
         let len = u32::to_be_bytes(val.len);
         let id = val.id.into();
-        // eprintln!("len = {:?}, {}", len, val.len); // todo remove
-        // let payload = match val.payload { // todo remove
-        //     Some(payload) => payload,
-        //     None => &[0u8; 0],
-        // };
         let payload = val.payload.unwrap_or_default();
         let payload_len = payload.len();
-        // eprintln!("pay len 2 = {}", payload_len); // todo remove
 
         let mut buf = Vec::with_capacity(4 + 1 + payload_len);
 
         buf.extend(len);
         buf.push(id);
         buf.extend(payload);
-        // eprintln!("buf len = {}, cap = {}", buf.len(), buf.capacity()); // todo remove
 
         buf
     }
 }
 
 /// Converts a byte stream into a [`Message`].
-impl<'a> From<&'a [u8]> for Message<'a> {
-    // impl From<Vec<u8>> for Message { // todo remove
+impl From<Vec<u8>> for Message {
     /// Deserializes a [`Message`] received from a wire transfer.
-    fn from(value: &'a [u8]) -> Message {
-        // fn from(value: Vec<u8>) -> Message { // todo remove
+    fn from(value: Vec<u8>) -> Message {
         let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).unwrap_or_else(|_| {
             panic!(
                 "Failed to deserialize message length; received: {:?}",
@@ -207,8 +199,7 @@ impl<'a> From<&'a [u8]> for Message<'a> {
         let payload = if len == 1 {
             None
         } else {
-            Some(&value[5..4 + len as usize])
-            // Some(value[5..4 + len as usize].to_vec()) // todo remove
+            Some(value[5..4 + len as usize].to_vec())
         };
 
         Self { len, id, payload }
@@ -252,19 +243,22 @@ impl From<RequestPayload> for Vec<u8> {
     }
 }
 
-// todo remove
-// /// Converts a [`RequestPayload`] into a byte stream.
-// impl<'a> From<RequestPayload> for &'a [u8] {
-//     /// Serializes a [`RequestPayload`] for a send transfer over the wire.
-//     fn from(value: RequestPayload) -> &'a [u8] {
-//         let mut buf = Vec::with_capacity(12);
-//         buf.extend(u32::to_be_bytes(value.index));
-//         buf.extend(u32::to_be_bytes(value.begin));
-//         buf.extend(u32::to_be_bytes(value.length));
-//         buf.leak()
-//     }
-// }
+/// Unused.
+///
+/// Converts a [`RequestPayload`] into a byte stream.
+impl<'a> From<RequestPayload> for &'a [u8] {
+    /// Serializes a [`RequestPayload`] for a send transfer over the wire.
+    fn from(value: RequestPayload) -> &'a [u8] {
+        let mut buf = Vec::with_capacity(12);
+        buf.extend(u32::to_be_bytes(value.index));
+        buf.extend(u32::to_be_bytes(value.begin));
+        buf.extend(u32::to_be_bytes(value.length));
+        buf.leak()
+    }
+}
 
+/// Unused.
+///
 /// Payload for the [`MessageId::Piece`] message
 ///
 /// The payload contains the following information:
@@ -306,5 +300,101 @@ impl<'a> From<&'a [u8]> for PiecePayload<'a> {
             _begin: begin,
             _block: block,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct MessageCodec;
+
+impl Decoder for MessageCodec {
+    type Item = Message;
+    type Error = MessageCodecError;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if src.len() < 4 {
+            // Not enough data to read length prefix.
+            return Ok(None);
+        }
+
+        // Read length prefix.
+        let mut length_bytes = [0u8; 4];
+        length_bytes.copy_from_slice(&src[..4]);
+        let length = u32::from_be_bytes(length_bytes) as usize;
+
+        // Check for heartbeat messages.
+        if length == 0 {
+            // Discard it.
+            src.advance(4);
+
+            // But also try again in case the src buffer has more messages.
+            return self.decode(src);
+        }
+
+        if src.len() < 5 {
+            // Not enough data to read length prefix and the message id.
+            return Ok(None);
+        }
+
+        // Check that the length is not too large.
+        if length > MAX_FRAME_SIZE - 4 {
+            return Err(MessageCodecError::LengthError(length.to_string()));
+        }
+
+        if src.len() < 4 + length {
+            // The full message has not yet arrived.
+            //
+            // We reserve more space in the buffer. This is not strictly
+            // necessary, but is a good idea performance-wise.
+            src.reserve(4 + length - src.len());
+
+            // We inform the Framed that we need more bytes to form the next frame.
+            return Ok(None);
+        }
+
+        let id = src[4].into();
+
+        let payload = if length > 1 {
+            Some(src[5..4 + length].to_vec())
+        } else {
+            None
+        };
+
+        // Use advance to modify src such that it no longer contains this frame.
+        src.advance(4 + length);
+
+        let msg = Message::new(id, payload);
+
+        Ok(Some(msg))
+    }
+}
+
+impl Encoder<Message> for MessageCodec {
+    type Error = MessageCodecError;
+
+    fn encode(&mut self, msg: Message, dst: &mut BytesMut) -> std::result::Result<(), Self::Error> {
+        let length = msg.len as usize;
+
+        // Don't send a message if it is longer than the other end will accept.
+        if length > MAX_FRAME_SIZE - 4 {
+            return Err(MessageCodecError::LengthError(length.to_string()));
+        }
+
+        // Convert the length into a byte array.
+        // The cast to u32 cannot overflow due to the length check above.
+        let len_slice = u32::to_be_bytes(length as u32);
+
+        // Reserve space in the buffer.
+        dst.reserve(4 + length);
+
+        dst.extend_from_slice(&len_slice);
+        dst.put_u8(msg.id as u8);
+        // if length > 1 {
+        //     dst.extend_from_slice(&msg.payload.expect("Expected to have some payload received"));
+        // } // todo remove
+        if let Some(payload) = msg.payload {
+            dst.extend_from_slice(&payload);
+        }
+
+        Ok(())
     }
 }

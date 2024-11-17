@@ -50,6 +50,19 @@ impl From<TrackerError> for String {
     }
 }
 
+/// Errors related to working with [`crate::message::MessageCodec`]
+#[derive(Debug, Error)]
+pub enum MessageCodecError {
+    #[error("Frame of length {0} is too large.")]
+    LengthError(String),
+}
+
+impl From<std::io::Error> for MessageCodecError {
+    fn from(value: std::io::Error) -> Self {
+        MessageCodecError::LengthError(value.to_string())
+    }
+}
+
 /// Errors related to working with [`crate::peer::Peer`]
 #[derive(Debug, Error)]
 pub enum PeerError {
@@ -71,16 +84,20 @@ pub enum PeerError {
     #[error("Wrong received length: expected {0}, received {1} bytes")]
     WrongLen(usize, usize),
 
+    #[error(transparent)]
+    FrameLengthError(MessageCodecError),
+
     #[error("Hash mismatch: expected {0}, calculated {1}")]
     HashMismatch(String, String),
 
     #[error(transparent)]
-    Other(anyhow::Error),
+    Other(#[from] anyhow::Error),
 }
 
 impl From<std::io::Error> for PeerError {
     fn from(value: std::io::Error) -> Self {
-        PeerError::HandshakeError(value.to_string())
+        // PeerError::HandshakeError(value.to_string())
+        PeerError::Other(anyhow::Error::from(value))
     }
 }
 
@@ -93,6 +110,12 @@ impl From<TryFromSliceError> for PeerError {
 impl From<(MessageId, MessageId)> for PeerError {
     fn from(value: (MessageId, MessageId)) -> Self {
         PeerError::WrongMessageId(value.0, value.1)
+    }
+}
+
+impl From<MessageCodecError> for PeerError {
+    fn from(value: MessageCodecError) -> Self {
+        PeerError::FrameLengthError(value)
     }
 }
 

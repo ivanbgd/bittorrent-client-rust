@@ -5,13 +5,15 @@
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddrV4;
 
-use anyhow::Result;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-
 use crate::constants::*;
 use crate::errors::PeerError;
-use crate::message::Message;
+use crate::message::{Message, MessageCodec};
+
+use anyhow::{Context, Result};
+use futures_util::{SinkExt, StreamExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio_util::codec::Framed;
 
 /// Peer object
 ///
@@ -29,7 +31,7 @@ pub struct Peer {
     pub addr: SocketAddrV4,
 
     /// An open stream to the peer
-    pub stream: Option<TcpStream>,
+    pub stream: Option<Framed<TcpStream, MessageCodec>>,
 
     /// A 20 bytes long SHA1 representation of the peer ID received during the handshake
     peer_id: Option<[u8; SHA1_LEN]>,
@@ -62,23 +64,33 @@ impl Peer {
         buf[INFO_HASH_RANGE].copy_from_slice(info_hash);
         buf[PEER_ID_RANGE].copy_from_slice(PEER_ID.as_bytes());
 
-        let mut stream = TcpStream::connect(self.addr).await?;
+        let mut stream = TcpStream::connect(self.addr)
+            .await
+            .context(format!("Failed to connect to peer {}", self.addr))?;
 
-        let written = stream.write(&buf).await?;
-        assert_eq!(HANDSHAKE_MSG_LEN, written);
+        stream
+            .write_all(&buf)
+            .await
+            .context(format!("Failed to send handshake to peer {}", self.addr))?;
 
-        stream.read_exact(&mut buf).await?;
+        stream.read_exact(&mut buf).await.context(format!(
+            "Failed to receive handshake from peer {}",
+            self.addr
+        ))?;
+
         if (&buf[BT_PROTOCOL_RANGE] == BT_PROTOCOL.as_bytes())
             && (&buf[INFO_HASH_RANGE] == info_hash)
         {
-            let peer_id = &buf[(HANDSHAKE_MSG_LEN - SHA1_LEN)..HANDSHAKE_MSG_LEN];
+            let peer_id = &buf[PEER_ID_RANGE];
             self.peer_id = Some(<[u8; SHA1_LEN]>::try_from(peer_id)?);
         } else {
             return Err(PeerError::HandshakeError(format!(
-                "received handshake parameters from peer {} don't match the sent parameters",
+                "Received handshake parameters from peer {} don't match the sent parameters",
                 self.addr
             )));
         }
+
+        let stream = Framed::new(stream, MessageCodec);
 
         self.stream = Some(stream);
 
@@ -86,40 +98,23 @@ impl Peer {
     }
 
     /// Send a message to a peer
-    pub(crate) async fn _send_msg<'a>(&mut self, msg: Message<'a>) -> Result<(), PeerError> {
+    pub(crate) async fn _send_msg(&mut self, msg: Message) -> Result<(), PeerError> {
         let stream = self
             .stream
             .as_mut()
             .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
-        let msg = <Vec<u8>>::from(msg);
-        stream.write_all(&msg).await?;
+        stream.send(msg).await.context("send a message")?;
         Ok(())
     }
 
-    /// Receive a message from a peer: Unchoke, Bitfield, etc.
-    ///
-    /// Don't use it for [`MessageId::Piece`] messages. Use [`Peer::recv_piece_msg`] for those.
-    pub(crate) async fn _recv_msg(
-        &mut self,
-        buf: &mut [u8; DEF_MSG_LEN],
-    ) -> Result<usize, PeerError> {
+    /// Receive a message from a peer
+    pub(crate) async fn _recv_msg(&mut self) -> Result<Message, PeerError> {
         let stream = self
             .stream
             .as_mut()
             .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
-        let read = stream.read(&mut buf[..]).await?;
-        Ok(read)
-    }
-
-    /// Receive a [`MessageId::Piece`] message from a peer
-    pub(crate) async fn _recv_piece_msg(&mut self, length: u32) -> Result<Vec<u8>, PeerError> {
-        let mut buf = vec![0u8; length as usize];
-        let stream = self
-            .stream
-            .as_mut()
-            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
-        stream.read_exact(&mut buf).await?;
-        Ok(buf)
+        let msg = stream.next().await.context("receive a message")??;
+        Ok(msg)
     }
 }
 
