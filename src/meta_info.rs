@@ -42,7 +42,7 @@ use crate::pieces::Pieces;
 ///
 /// Additionally, updates the info hash field which is not a part of the BitTorrent Specification.
 pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo, MetaInfoError> {
-    eprintln!("META INFO CALLED!"); //todo rem
+    log::debug!("META INFO CALLED!");
     let contents = fs::read(torrent)?;
 
     let mut metainfo: MetaInfo = serde_bencode::from_bytes(&contents)?;

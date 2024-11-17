@@ -388,9 +388,6 @@ impl Encoder<Message> for MessageCodec {
 
         dst.extend_from_slice(&len_slice);
         dst.put_u8(msg.id as u8);
-        // if length > 1 {
-        //     dst.extend_from_slice(&msg.payload.expect("Expected to have some payload received"));
-        // } // todo remove
         if let Some(payload) = msg.payload {
             dst.extend_from_slice(&payload);
         }

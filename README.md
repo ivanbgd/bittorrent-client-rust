@@ -45,6 +45,9 @@ Note: This section is for stages 2 and beyond.
 
 We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
 
+To enable the logging facility, first set the logging level by executing
+`RUST_LOG=debug` or `RUST_LOG=info`, for example.
+
 Sample torrent files are provided in the root of the repository,
 as well as in the [test_samples](./test_samples) subdirectory.
 
