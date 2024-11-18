@@ -386,6 +386,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
                 Some(RequestPayload::new(index, begin, length).into()),
             );
             debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");
+            println!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo
             stream.send(msg).await.context("Send a Request message")?;
 
             // Wait for a Piece message for each block we've requested.
@@ -406,6 +407,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
         }
 
         info!("piece {:2}/{num_pcs} downloaded", piece_index + 1);
+        println!("piece {:2}/{num_pcs} downloaded", piece_index + 1); //todo
     }
 
     file_writer.write_all(&contents).await?;
