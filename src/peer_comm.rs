@@ -277,17 +277,16 @@ pub async fn download_piece(
 ///
 /// `$ ./your_bittorrent.sh download -o /tmp/test.txt sample.torrent`
 pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerError> {
-    // let output = OpenOptions::new()
-    //     .append(true)
-    //     .create(true)
-    //     .open(output)
-    //     .await?;
-    let file = File::create(output).await?;
+    let file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(output)
+        .await?;
     let mut file_writer = BufWriter::new(file);
 
     // Perform the tracker GET request to get a list of peers
     let (peers, info) = get_peers(torrent)?;
-    let peers = peers.0;
+    let mut peers = peers.0;
 
     let file_len = info.length();
     let piece_len = info.plen;
@@ -315,47 +314,69 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     debug!("last_block_len = {}", last_block_len);
     debug!("total_num_blocks = {}", total_num_blocks);
 
+    // Support working with multiple peers at the same time
+    let mut num_peers = min(MAX_PIPELINED_REQUESTS, num_blocks_per_piece);
+    num_peers = min(peers.len(), num_peers);
+    debug!("num_peers = {num_peers}; peers.len() = {}", peers.len());
+
+    let mut streams: Vec<Framed<TcpStream, MessageCodec>> = Vec::with_capacity(num_peers);
+
+    // Get all peers to work with - handshake with them and store their streams.
+    // The selection of peers could be randomized, but it isn't necessary; rather, this is just an idea.
+    for (peer_idx, peer) in peers.iter_mut().enumerate().take(num_peers) {
+        // Establish a TCP connection with a peer, and perform a handshake
+        let peer = handshake(peer, &info.info_hash).await?;
+
+        debug!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
+
+        let mut stream = peer
+            .stream
+            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr));
+
+        // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
+
+        // Receive a Bitfield message
+        let msg = stream
+            .next()
+            .await
+            .context("Receive a Bitfield message")??;
+        debug!("01 peer_idx {peer_idx}: {msg}");
+        if msg.id != MessageId::Bitfield {
+            return Err(PeerError::from((msg.id, MessageId::Bitfield)));
+        }
+
+        // Send the Interested message
+        let msg = Message::new(MessageId::Interested, None);
+        stream
+            .send(msg)
+            .await
+            .context("Send the Interested message")?;
+
+        // Receive an Unchoke message
+        let msg = stream
+            .next()
+            .await
+            .context("Receive an Unchoke message")??;
+        debug!("02 peer_idx {peer_idx}: {msg}");
+        if msg.id != MessageId::Unchoke {
+            return Err(PeerError::from((msg.id, MessageId::Unchoke)));
+        }
+
+        streams.push(stream);
+    }
+
+    // Number of the outer loop iterations, which is per blocks
+    let mut block_iters =
+        num_blocks_per_piece / streams.len() + num_blocks_per_piece % streams.len();
+
+    debug!("streams.len() = {}", streams.len());
+    debug!("block_iters = {block_iters}",);
+
     // All piece hashes from the torrent file
     let pieces = &info.pieces.0;
 
-    let peer = &peers[0];
-
-    // Establish a TCP connection with a peer, and perform a handshake
-    let peer = handshake(peer, &info.info_hash).await?;
-
-    let mut stream = peer
-        .stream
-        .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr));
-
-    // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
-
-    // Receive a Bitfield message
-    let msg = stream
-        .next()
-        .await
-        .context("Receive a Bitfield message")??;
-    if msg.id != MessageId::Bitfield {
-        return Err(PeerError::from((msg.id, MessageId::Bitfield)));
-    }
-
-    // Send the Interested message
-    let msg = Message::new(MessageId::Interested, None);
-    stream
-        .send(msg)
-        .await
-        .context("Send the Interested message")?;
-
-    // Receive an Unchoke message
-    let msg = stream
-        .next()
-        .await
-        .context("Receive an Unchoke message")??;
-    if msg.id != MessageId::Unchoke {
-        return Err(PeerError::from((msg.id, MessageId::Unchoke)));
-    }
-
-    // Entire contents of the file
-    let mut contents = vec![];
+    // // Entire contents of the file
+    // let mut contents = vec![];todo
 
     // Block index - for logging purposes only
     let mut block = 0usize;
@@ -365,39 +386,63 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
         let is_last_piece = piece_index == num_pcs - 1;
         if is_last_piece {
             num_blocks_per_piece = num_blocks_in_last_piece;
+            block_iters = num_blocks_per_piece;
+            num_peers = num_blocks_in_last_piece;
+            num_peers = min(peers.len(), num_peers);
         }
-        let block_iters = num_blocks_per_piece;
 
         // For validating the hash of the received piece
         let mut hasher = Sha1::new();
 
-        for i in 0..block_iters {
-            block += 1;
+        // The combined loop counter - from both loops; represents the block ordinal number
+        let mut i = 0usize;
 
-            // Send a Request message for each block - we don't request pieces but blocks.
-            let index = piece_index as u32;
-            let begin = u32::try_from(i * block_len)?;
-            let mut length = block_len as u32;
-            if is_last_piece && i == num_blocks_per_piece - 1 {
-                length = last_block_len as u32;
+        // Fetch blocks from peers
+
+        // Outer loop is by blocks, while the inner loop is by peers.
+        // I am not sure that this brings any speed improvements; it might.
+        'outer: for block_idx in 0..block_iters {
+            for (peer_idx, stream) in streams.iter_mut().enumerate().take(num_peers) {
+                block += 1;
+
+                // Exchange messages with the peer
+
+                // Send a Request message for each block - we don't request pieces but blocks.
+                let index = piece_index as u32;
+                let begin = u32::try_from(i * block_len)?;
+                let mut length = block_len as u32;
+                if is_last_piece && i == num_blocks_per_piece - 1 {
+                    length = last_block_len as u32;
+                }
+                let msg = Message::new(
+                    MessageId::Request,
+                    Some(RequestPayload::new(index, begin, length).into()),
+                );
+                debug!(
+                    "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
+                    peer_idx = {peer_idx}; piece index = {index}, begin = {begin}, length = {length}"
+                );
+                // debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");//todo
+                eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
+                stream.send(msg).await.context("Send a Request message")?;
+
+                // Wait for a Piece message for each block we've requested.
+                let msg = stream.next().await.context("Receive a Piece message")??;
+                if msg.id != MessageId::Piece {
+                    return Err(PeerError::from((msg.id, MessageId::Piece)));
+                }
+
+                let payload = &msg.payload.expect("Expected to have some payload received")[8..];
+                hasher.update(payload);
+                file_writer.write_all(payload).await?;
+                // contents.extend(payload);todo
+
+                if i == num_blocks_per_piece - 1 {
+                    break 'outer;
+                }
+
+                i += 1;
             }
-            let msg = Message::new(
-                MessageId::Request,
-                Some(RequestPayload::new(index, begin, length).into()),
-            );
-            debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");
-            println!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo
-            stream.send(msg).await.context("Send a Request message")?;
-
-            // Wait for a Piece message for each block we've requested.
-            let msg = stream.next().await.context("Receive a Piece message")??;
-            if msg.id != MessageId::Piece {
-                return Err(PeerError::from((msg.id, MessageId::Piece)));
-            }
-
-            let payload = &msg.payload.expect("Expected to have some payload received")[8..];
-            hasher.update(payload);
-            contents.extend(payload);
         }
 
         let piece = hex::encode(piece_hash);
@@ -406,11 +451,13 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
             return Err(PeerError::HashMismatch(piece, hash));
         }
 
-        info!("piece {:2}/{num_pcs} downloaded", piece_index + 1);
-        println!("piece {:2}/{num_pcs} downloaded", piece_index + 1); //todo
+        info!(
+            "piece {:2}/{num_pcs} downloaded and stored",
+            piece_index + 1
+        );
+        eprintln!("piece {:2}/{num_pcs} downloaded", piece_index + 1); //todo rem
     }
 
-    file_writer.write_all(&contents).await?;
     file_writer.flush().await?;
 
     let file = File::open(output).await?;
