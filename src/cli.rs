@@ -55,4 +55,14 @@ pub enum Commands {
         /// Zero-based piece index
         piece_index: usize,
     },
+
+    /// Download the whole file and save it to disk
+    Download {
+        /// Path to an output file for the whole file
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Path to a torrent file
+        torrent: PathBuf,
+    },
 }

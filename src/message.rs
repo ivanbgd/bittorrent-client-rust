@@ -166,6 +166,16 @@ impl Message {
     }
 }
 
+impl Display for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Message {{ len: {}, id: {:?}, payload: {:02X?} }}",
+            self.len, self.id, &self.payload
+        )
+    }
+}
+
 /// Converts a [`Message`] into a byte stream.
 impl From<Message> for Vec<u8> {
     /// Serializes a [`Message`] for a send transfer over the wire.

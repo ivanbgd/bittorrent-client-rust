@@ -4,6 +4,7 @@
 //! - `./your_bittorrent.sh peers <path_to_torrent_file>`
 //! - `./your_bittorrent.sh handshake <path_to_torrent_file> <peer_ip>:<peer_port>`
 //! - `./your_bittorrent.sh download_piece -o <path_to_output_file> <path_to_torrent_file> <piece_index>`
+//! - `./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>`
 
 use anyhow::Result;
 use clap::Parser;
@@ -13,7 +14,7 @@ use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::decode::decode_bencoded_value;
 use bittorrent_starter_rust::errors::ae2s;
 use bittorrent_starter_rust::meta_info::meta_info;
-use bittorrent_starter_rust::peer_comm::{download_piece, handshake};
+use bittorrent_starter_rust::peer_comm::{download, download_piece, handshake};
 use bittorrent_starter_rust::tracker::get_peers;
 
 #[tokio::main]
@@ -46,6 +47,9 @@ async fn main() -> Result<(), String> {
             piece_index,
         } => {
             download_piece(output, torrent, *piece_index).await?;
+        }
+        Commands::Download { output, torrent } => {
+            download(output, torrent).await?;
         }
     }
 
