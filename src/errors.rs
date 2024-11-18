@@ -81,7 +81,7 @@ pub enum PeerError {
     #[error(transparent)]
     TryFromIntError(#[from] TryFromIntError),
 
-    #[error("Wrong received length: expected {0}, received {1} bytes")]
+    #[error("Wrong length: expected {0}, got {1} bytes")]
     WrongLen(usize, usize),
 
     #[error(transparent)]

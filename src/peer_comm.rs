@@ -37,7 +37,7 @@ use crate::tracker::get_peers;
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use log::debug;
+use log::{debug, info};
 use sha1::{Digest, Sha1};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -277,12 +277,13 @@ pub async fn download_piece(
 ///
 /// `$ ./your_bittorrent.sh download -o /tmp/test.txt sample.torrent`
 pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerError> {
-    let output = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(output)
-        .await?;
-    let mut file_writer = BufWriter::new(output);
+    // let output = OpenOptions::new()
+    //     .append(true)
+    //     .create(true)
+    //     .open(output)
+    //     .await?;
+    let file = File::create(output).await?;
+    let mut file_writer = BufWriter::new(file);
 
     // Perform the tracker GET request to get a list of peers
     let (peers, info) = get_peers(torrent)?;
@@ -295,6 +296,10 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     if last_piece_len == 0 {
         last_piece_len = piece_len;
     }
+    debug!("file_len = {}", file_len);
+    debug!("piece_len = {}", piece_len);
+    debug!("last_piece_len = {}", last_piece_len);
+    debug!("num_pcs = {}", num_pcs);
 
     let block_len = BLOCK_SIZE;
     let mut num_blocks_per_piece = piece_len / block_len;
@@ -303,6 +308,12 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     if last_block_len == 0 {
         last_block_len = block_len;
     }
+    let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece;
+    debug!("block_len = {}", block_len);
+    debug!("num_blocks_per_piece = {}", num_blocks_per_piece);
+    debug!("num_blocks_in_last_piece = {}", num_blocks_in_last_piece);
+    debug!("last_block_len = {}", last_block_len);
+    debug!("total_num_blocks = {}", total_num_blocks);
 
     // All piece hashes from the torrent file
     let pieces = &info.pieces.0;
@@ -343,6 +354,12 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
         return Err(PeerError::from((msg.id, MessageId::Unchoke)));
     }
 
+    // Entire contents of the file
+    let mut contents = vec![];
+
+    // Block index - for logging purposes only
+    let mut block = 0usize;
+
     // Download all pieces
     for (piece_index, piece_hash) in pieces.iter().enumerate() {
         let is_last_piece = piece_index == num_pcs - 1;
@@ -355,6 +372,8 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
         let mut hasher = Sha1::new();
 
         for i in 0..block_iters {
+            block += 1;
+
             // Send a Request message for each block - we don't request pieces but blocks.
             let index = piece_index as u32;
             let begin = u32::try_from(i * block_len)?;
@@ -366,7 +385,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
                 MessageId::Request,
                 Some(RequestPayload::new(index, begin, length).into()),
             );
-            debug!("i = {i}: piece index = {index}, begin = {begin}, length = {length}");
+            debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");
             stream.send(msg).await.context("Send a Request message")?;
 
             // Wait for a Piece message for each block we've requested.
@@ -377,7 +396,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
 
             let payload = &msg.payload.expect("Expected to have some payload received")[8..];
             hasher.update(payload);
-            file_writer.write_all(payload).await?;
+            contents.extend(payload);
         }
 
         let piece = hex::encode(piece_hash);
@@ -386,8 +405,29 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
             return Err(PeerError::HashMismatch(piece, hash));
         }
 
-        file_writer.flush().await?;
+        info!("piece {:2}/{num_pcs} downloaded", piece_index + 1);
+    }
+
+    file_writer.write_all(&contents).await?;
+    file_writer.flush().await?;
+
+    let file = File::open(output).await?;
+    let file_size = file.metadata().await?.len() as usize;
+    info!(
+        "wrote {file_size} out of expected {file_len} bytes to \"{}\"",
+        output.display()
+    );
+    if file_len != file_size {
+        return Err(PeerError::WrongLen(file_len, file_size));
     }
 
     Ok(())
 }
+
+// // TODO: Move to a separate (new) file.
+// pub struct Piece {
+//     index: usize,
+//     data: Vec<u8>,
+//     correct_hash: String, // todo: not necessary?
+//     calc_hash: String,    // todo: not necessary?
+// }
