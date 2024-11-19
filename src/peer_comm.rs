@@ -39,7 +39,7 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info};
 use sha1::{Digest, Sha1};
-use tokio::fs::{File, OpenOptions};
+use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -76,7 +76,7 @@ pub async fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Resul
 /// Arguments:
 /// - output: &[`PathBuf`], path to the output file for storing the downloaded piece
 /// - torrent: &[`PathBuf`], path to a torrent file
-/// - piece_index: &[`usize`], zero-based piece index
+/// - piece_index: [`usize`], zero-based piece index
 ///
 /// The last piece can be smaller than other pieces which are of same fixed size that
 /// is defined in the torrent file.
@@ -96,8 +96,8 @@ pub async fn download_piece(
     torrent: &PathBuf,
     piece_index: usize,
 ) -> Result<(), PeerError> {
-    let output = File::create(output).await?;
-    let mut file_writer = BufWriter::new(output);
+    let file = File::create(output).await?;
+    let mut file_writer = BufWriter::new(file);
 
     // For validating the hash of the received piece
     let mut hasher = Sha1::new();
@@ -266,22 +266,20 @@ pub async fn download_piece(
 
     file_writer.flush().await?;
 
+    info!("Success!");
+
     Ok(())
 }
 
 /// Downloads a whole file and stores it.
 ///
 /// Arguments:
-/// - output: &[`PathBuf`], path to the output file for storing the downloaded piece
+/// - output: &[`PathBuf`], path to the output file for storing the whole downloaded file
 /// - torrent: &[`PathBuf`], path to a torrent file
 ///
 /// `$ ./your_bittorrent.sh download -o /tmp/test.txt sample.torrent`
 pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerError> {
-    let file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(output)
-        .await?;
+    let file = File::create(output).await?;
     let mut file_writer = BufWriter::new(file);
 
     // Perform the tracker GET request to get a list of peers
@@ -422,7 +420,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
                     "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
                     peer_idx = {peer_idx}; piece index = {index}, begin = {begin}, length = {length}"
                 );
-                // debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");//todo
+                // debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");//todo rem
                 eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
                 stream.send(msg).await.context("Send a Request message")?;
 
@@ -463,12 +461,14 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     let file = File::open(output).await?;
     let file_size = file.metadata().await?.len() as usize;
     info!(
-        "wrote {file_size} out of expected {file_len} bytes to \"{}\"",
+        "Wrote {file_size} out of expected {file_len} bytes to \"{}\".",
         output.display()
     );
     if file_len != file_size {
         return Err(PeerError::WrongLen(file_len, file_size));
     }
+
+    info!("Success!");
 
     Ok(())
 }
@@ -479,4 +479,14 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
 //     data: Vec<u8>,
 //     correct_hash: String, // todo: not necessary?
 //     calc_hash: String,    // todo: not necessary?
+// }
+
+// /// A helper function that is used for exchanging messages with the peers
+// /// for getting blocks (sub-pieces) of data from them.
+// ///
+// /// Works with multiple peers and in a pipelined fashion, for improved download speed.
+// ///
+// /// Sends requests to peers, and gets responses from them.
+// async fn get_blocks(file: File) -> Result<(), PeerError> {
+//     Ok(())
 // }
