@@ -3,6 +3,7 @@
 //! Error types and helper functions used in the application
 
 use std::array::TryFromSliceError;
+use std::net::SocketAddrV4;
 use std::num::TryFromIntError;
 
 use thiserror::Error;
@@ -74,6 +75,9 @@ pub enum PeerError {
 
     #[error("Wrong message ID: {0}; expected {1}")]
     WrongMessageId(MessageId, MessageId),
+
+    #[error("The peer {0} doesn't have the piece index {1}")]
+    MissingPiece(SocketAddrV4, usize),
 
     #[error("Wrong piece index: {0}; expected index < {1}")]
     WrongPieceIndex(usize, usize),

@@ -35,6 +35,9 @@ pub struct Peer {
 
     /// A 20 bytes long SHA1 representation of the peer ID received during the handshake
     peer_id: Option<[u8; SHA1_LEN]>,
+
+    /// Represents the pieces that the peer has; received in a Bitfield message
+    pub bitfield: Option<Vec<u8>>,
 }
 
 impl Peer {
@@ -44,6 +47,7 @@ impl Peer {
             addr: *addr,
             stream: None,
             peer_id: None,
+            bitfield: None,
         }
     }
 
@@ -98,21 +102,25 @@ impl Peer {
     }
 
     /// Send a message to a peer
-    pub(crate) async fn _send_msg(&mut self, msg: Message) -> Result<(), PeerError> {
-        let stream = self
-            .stream
-            .as_mut()
-            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
+    pub(crate) async fn send_msg(&mut self, msg: Message) -> Result<(), PeerError> {
+        let stream = self.stream.as_mut().unwrap_or_else(|| {
+            panic!(
+                "Expected the peer {} to have its stream field populated",
+                self.addr
+            )
+        });
         stream.send(msg).await.context("send a message")?;
         Ok(())
     }
 
     /// Receive a message from a peer
-    pub(crate) async fn _recv_msg(&mut self) -> Result<Message, PeerError> {
-        let stream = self
-            .stream
-            .as_mut()
-            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", self.addr));
+    pub(crate) async fn recv_msg(&mut self) -> Result<Message, PeerError> {
+        let stream = self.stream.as_mut().unwrap_or_else(|| {
+            panic!(
+                "Expected the peer {} to have its stream field populated",
+                self.addr
+            )
+        });
         let msg = stream.next().await.context("receive a message")??;
         Ok(msg)
     }

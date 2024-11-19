@@ -31,18 +31,15 @@ use std::path::PathBuf;
 
 use crate::constants::{BLOCK_SIZE, MAX_PIPELINED_REQUESTS, SHA1_LEN};
 use crate::errors::PeerError;
-use crate::message::{Message, MessageCodec, MessageId, RequestPayload};
+use crate::message::{Message, MessageId, RequestPayload};
 use crate::peer::Peer;
 use crate::tracker::get_peers;
 
 use anyhow::{Context, Result};
-use futures_util::{SinkExt, StreamExt};
 use log::{debug, info};
 use sha1::{Digest, Sha1};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::net::TcpStream;
-use tokio_util::codec::Framed;
 
 /// Sends a handshake to a single peer, and receives a handshake from the peer, in the same format.
 ///
@@ -163,59 +160,52 @@ pub async fn download_piece(
     num_peers = min(peers.len(), num_peers);
     debug!("num_peers = {num_peers}; peers.len() = {}", peers.len());
 
-    let mut streams: Vec<Framed<TcpStream, MessageCodec>> = Vec::with_capacity(num_peers);
+    let mut work_peers: Vec<Peer> = Vec::with_capacity(num_peers);
 
     // Get all peers to work with - handshake with them and store their streams.
     // The selection of peers could be randomized, but it isn't necessary; rather, this is just an idea.
     for (peer_idx, peer) in peers.iter_mut().enumerate().take(num_peers) {
         // Establish a TCP connection with a peer, and perform a handshake
-        let peer = handshake(peer, &info.info_hash).await?;
+        let mut peer = handshake(peer, &info.info_hash).await?;
 
         debug!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
-        let mut stream = peer
-            .stream
-            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr));
-
         // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
 
-        // Receive a Bitfield message
-        let msg = stream
-            .next()
-            .await
-            .context("Receive a Bitfield message")??;
+        // Receive a Bitfield message (it is optional in general case, so we can improve this)
+        let msg = peer.recv_msg().await.context("Bitfield")?;
         debug!("01 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Bitfield {
             return Err(PeerError::from((msg.id, MessageId::Bitfield)));
         }
+        peer.bitfield = Some(
+            msg.payload
+                .clone()
+                .expect("Expected to have received a Bitfield message"),
+        );
 
         // Send the Interested message
         let msg = Message::new(MessageId::Interested, None);
-        stream
-            .send(msg)
-            .await
-            .context("Send the Interested message")?;
+        peer.send_msg(msg).await.context("Interested")?;
 
         // Receive an Unchoke message
-        let msg = stream
-            .next()
-            .await
-            .context("Receive an Unchoke message")??;
+        let msg = peer.recv_msg().await.context("Unchoke")?;
         debug!("02 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Unchoke {
             return Err(PeerError::from((msg.id, MessageId::Unchoke)));
         }
 
-        streams.push(stream);
+        work_peers.push(peer);
     }
 
     // Number of the outer loop iterations, which is per blocks
-    let block_iters = num_blocks_per_piece / streams.len() + num_blocks_per_piece % streams.len();
+    let block_iters =
+        num_blocks_per_piece / work_peers.len() + num_blocks_per_piece % work_peers.len();
 
     // The combined loop counter - from both loops; represents the block ordinal number
     let mut i = 0usize;
 
-    debug!("streams.len() = {}", streams.len());
+    debug!("work_peers.len() = {}", work_peers.len());
     debug!("block_iters = {block_iters}",);
 
     // Fetch blocks from peers
@@ -223,7 +213,12 @@ pub async fn download_piece(
     // Outer loop is by blocks, while the inner loop is by peers.
     // I am not sure that this brings any speed improvements; it might.
     'outer: for block_idx in 0..block_iters {
-        for (peer_idx, stream) in streams.iter_mut().enumerate().take(num_peers) {
+        for (peer_idx, peer) in work_peers.iter_mut().enumerate().take(num_peers) {
+            if !check_bitfield(peer, piece_index) {
+                // TODO: Don't return, but mark the piece for retry, and do retry somehow.
+                return Err(PeerError::MissingPiece(peer.addr, piece_index));
+            }
+
             // Exchange messages with the peer
 
             // Send a Request message for each block - we don't request pieces but blocks.
@@ -238,15 +233,15 @@ pub async fn download_piece(
                 Some(RequestPayload::new(index, begin, length).into()),
             );
             debug!("i = {i}: block_idx = {block_idx}, peer_idx = {peer_idx}; piece index = {index}, begin = {begin}, length = {length}");
-            stream.send(msg).await.context("Send a Request message")?;
+            peer.send_msg(msg).await.context("Request")?;
 
             // Wait for a Piece message for each block we've requested.
-            let msg = stream.next().await.context("Receive a Piece message")??;
+            let msg = peer.recv_msg().await.context("Piece")?;
             if msg.id != MessageId::Piece {
                 return Err(PeerError::from((msg.id, MessageId::Piece)));
             }
 
-            let payload = &msg.payload.expect("Expected to have some payload received")[8..];
+            let payload = &msg.payload.expect("Expected to have received some payload")[8..];
             hasher.update(payload);
             file_writer.write_all(payload).await?;
 
@@ -317,57 +312,67 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     num_peers = min(peers.len(), num_peers);
     debug!("num_peers = {num_peers}; peers.len() = {}", peers.len());
 
-    let mut streams: Vec<Framed<TcpStream, MessageCodec>> = Vec::with_capacity(num_peers);
+    // let mut streams: Vec<Framed<TcpStream, MessageCodec>> = Vec::with_capacity(num_peers);
+    let mut work_peers: Vec<Peer> = Vec::with_capacity(num_peers);
 
     // Get all peers to work with - handshake with them and store their streams.
     // The selection of peers could be randomized, but it isn't necessary; rather, this is just an idea.
     for (peer_idx, peer) in peers.iter_mut().enumerate().take(num_peers) {
         // Establish a TCP connection with a peer, and perform a handshake
-        let peer = handshake(peer, &info.info_hash).await?;
+        let mut peer = handshake(peer, &info.info_hash).await?;
 
         debug!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
-        let mut stream = peer
-            .stream
-            .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr));
+        // let mut stream = peer
+        //     .stream
+        //     .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr)); todo rem
 
         // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
 
-        // Receive a Bitfield message
-        let msg = stream
-            .next()
-            .await
-            .context("Receive a Bitfield message")??;
+        // Receive a Bitfield message (it is optional in general case, so we can improve this)
+        // let msg = stream todo rem
+        //     .next()
+        //     .await
+        //     .context("Receive a Bitfield message")??;
+        let msg = peer.recv_msg().await.context("Bitfield")?;
         debug!("01 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Bitfield {
             return Err(PeerError::from((msg.id, MessageId::Bitfield)));
         }
+        peer.bitfield = Some(
+            msg.payload
+                .clone()
+                .expect("Expected to have received a Bitfield message"),
+        );
 
         // Send the Interested message
         let msg = Message::new(MessageId::Interested, None);
-        stream
-            .send(msg)
-            .await
-            .context("Send the Interested message")?;
+        peer.send_msg(msg).await.context("Interested")?;
+        // stream
+        //     .send(msg)
+        //     .await
+        //     .context("Send the Interested message")?; todo rem
 
         // Receive an Unchoke message
-        let msg = stream
-            .next()
-            .await
-            .context("Receive an Unchoke message")??;
+        let msg = peer.recv_msg().await.context("Unchoke")?;
+        // let msg = stream
+        //     .next()
+        //     .await
+        //     .context("Receive an Unchoke message")??; todo rem
         debug!("02 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Unchoke {
             return Err(PeerError::from((msg.id, MessageId::Unchoke)));
         }
 
-        streams.push(stream);
+        // streams.push(stream);todo rem
+        work_peers.push(peer);
     }
 
     // Number of the outer loop iterations, which is per blocks
     let mut block_iters =
-        num_blocks_per_piece / streams.len() + num_blocks_per_piece % streams.len();
+        num_blocks_per_piece / work_peers.len() + num_blocks_per_piece % work_peers.len();
 
-    debug!("streams.len() = {}", streams.len());
+    debug!("work_peers.len() = {}", work_peers.len());
     debug!("block_iters = {block_iters}",);
 
     // All piece hashes from the torrent file
@@ -398,10 +403,23 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
         // Fetch blocks from peers
 
         // Outer loop is by blocks, while the inner loop is by peers.
-        // I am not sure that this brings any speed improvements; it might.
+        // I am not sure that this brings any speed improvements; it might. todo
         'outer: for block_idx in 0..block_iters {
-            for (peer_idx, stream) in streams.iter_mut().enumerate().take(num_peers) {
+            for (peer_idx, peer) in work_peers.iter_mut().enumerate().take(num_peers) {
                 block += 1;
+
+                if !check_bitfield(peer, piece_index) {
+                    // TODO: Don't return, but mark the piece for retry, and do retry somehow.
+                    return Err(PeerError::MissingPiece(peer.addr, piece_index));
+                }
+
+                // todo rem
+                // let stream = peer.stream.as_mut().unwrap_or_else(|| {
+                //     panic!(
+                //         "Expected the peer {} to have its stream field populated",
+                //         peer.addr
+                //     )
+                // });
 
                 // Exchange messages with the peer
 
@@ -418,19 +436,19 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
                 );
                 debug!(
                     "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
-                    peer_idx = {peer_idx}; piece index = {index}, begin = {begin}, length = {length}"
+                    peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
                 );
                 // debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");//todo rem
                 eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
-                stream.send(msg).await.context("Send a Request message")?;
+                peer.send_msg(msg).await.context("Request")?;
 
                 // Wait for a Piece message for each block we've requested.
-                let msg = stream.next().await.context("Receive a Piece message")??;
+                let msg = peer.recv_msg().await.context("Piece")?;
                 if msg.id != MessageId::Piece {
                     return Err(PeerError::from((msg.id, MessageId::Piece)));
                 }
 
-                let payload = &msg.payload.expect("Expected to have some payload received")[8..];
+                let payload = &msg.payload.expect("Expected to have received some payload")[8..];
                 hasher.update(payload);
                 file_writer.write_all(payload).await?;
                 // contents.extend(payload);todo
@@ -471,6 +489,31 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     info!("Success!");
 
     Ok(())
+}
+
+/// Check if the peer has the required piece.
+///
+/// The challenge doesn't require this as all their peers have all the required pieces.
+///
+/// The Bitfield message is variable length. The high bit in the first byte corresponds to piece index 0.
+/// Bits that are cleared indicated a missing piece, and set bits indicate a valid and available piece.
+/// Spare bits at the end are set to zero.
+fn check_bitfield(peer: &Peer, piece_index: usize) -> bool {
+    let bitfield = peer.bitfield.as_ref().unwrap_or_else(|| {
+        panic!(
+            "Expected the peer {} to have its bitfield field populated",
+            peer.addr
+        )
+    });
+    let idx = piece_index / 8;
+    let byte = bitfield[idx];
+    let sr: u8 = 7 - ((piece_index % 8) as u8);
+    let piece_bit: u8 = byte >> sr;
+    // eprintln!("{bitfield:02X?}, {idx}, {byte:02X?}, {sr}, {piece_bit:02X?}"); //todo rem
+    if piece_bit & 1 != 1 {
+        return false;
+    }
+    true
 }
 
 // // TODO: Move to a separate (new) file.

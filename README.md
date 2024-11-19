@@ -68,3 +68,7 @@ but it hasn't been implemented.
 We only support compact mode, but that is the recommended mode in practice anyway, so it should be enough.  
 https://www.bittorrent.org/beps/bep_0023.html  
 The assignment itself only supports the compact mode.
+
+# Possible improvements
+
+- The Bitfiled message is optional, and a peer doesn't need to send it in case it doesn't have any piece. 
