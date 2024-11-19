@@ -29,17 +29,18 @@ use std::cmp::min;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 
-use crate::constants::{BLOCK_SIZE, MAX_PIPELINED_REQUESTS, SHA1_LEN};
-use crate::errors::PeerError;
-use crate::message::{Message, MessageId, RequestPayload};
-use crate::peer::Peer;
-use crate::tracker::get_peers;
-
 use anyhow::{Context, Result};
 use log::{debug, info};
 use sha1::{Digest, Sha1};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
+
+use crate::constants::{BLOCK_SIZE, MAX_PIPELINED_REQUESTS, SHA1_LEN};
+use crate::errors::PeerError;
+use crate::message::{Message, MessageId, RequestPayload};
+use crate::meta_info::Info;
+use crate::peer::Peer;
+use crate::tracker::get_peers;
 
 /// Sends a handshake to a single peer, and receives a handshake from the peer, in the same format.
 ///
@@ -66,6 +67,19 @@ pub async fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Resul
     peer.handshake(info_hash).await?;
 
     Ok(peer)
+}
+
+struct WorkParams {
+    peers: Vec<SocketAddrV4>,
+    info: Info,
+    file_len: usize,
+    num_pcs: usize,
+    is_last_piece: Option<bool>,
+    block_len: usize,
+    num_blocks_per_piece: usize,
+    num_blocks_in_last_piece: usize,
+    last_block_len: usize,
+    total_num_blocks: usize,
 }
 
 /// Downloads a single piece of a file and stores it.
@@ -96,65 +110,25 @@ pub async fn download_piece(
     let file = File::create(output).await?;
     let mut file_writer = BufWriter::new(file);
 
-    // For validating the hash of the received piece
-    let mut hasher = Sha1::new();
-
-    // Perform the tracker GET request to get a list of peers
-    let (peers, info) = get_peers(torrent)?;
-    let mut peers = peers.0;
-
-    // Calculate where the requested piece begins in the file - not needed in this function
-    let _piece_begin = piece_index * info.plen;
-
-    // The file to download is split into pieces of same fixed length,
-    // which is defined in torrent file and is a power of two,
-    // except potentially for the last piece which can be smaller.
-    // File ultimately needs to be assembled from received pieces, but this function is not meant for that.
-    // The file size is also provided in the torrent file.
-    let file_len = info.length();
-    let piece_len = info.plen;
-    let mut last_piece_len = file_len % piece_len;
-    let num_pcs = file_len / piece_len + last_piece_len.clamp(0, 1);
-    if last_piece_len == 0 {
-        last_piece_len = piece_len;
-    }
-    let is_last_piece = piece_index == num_pcs - 1;
-
-    debug!("piece_index = {}", piece_index);
-    debug!("file_len = {}", file_len);
-    debug!("piece_len = {}", piece_len);
-    debug!("last_piece_len = {}", last_piece_len);
-    debug!("num_pcs = {}", num_pcs);
-    debug!("is_last_piece = {}", is_last_piece);
+    let WorkParams {
+        mut peers,
+        info,
+        num_pcs,
+        is_last_piece,
+        block_len,
+        num_blocks_per_piece,
+        num_blocks_in_last_piece,
+        last_block_len,
+        ..
+    } = get_work_params(torrent, Some(piece_index))?;
 
     if piece_index >= num_pcs {
         return Err(PeerError::WrongPieceIndex(piece_index, num_pcs));
     }
 
-    // Pieces are split into blocks and transferred as such.
-    // Pieces ultimately need to be assembled from received blocks.
-    // Block size is 16 kB (`BLOCK_SIZE`), except potentially for the last block which can be smaller.
-    let block_len = BLOCK_SIZE;
-    let mut num_blocks_per_piece = piece_len / block_len;
-    let mut last_block_len = last_piece_len % block_len;
-    let num_blocks_in_last_piece = last_piece_len / block_len + last_block_len.clamp(0, 1);
-    if last_block_len == 0 {
-        last_block_len = block_len;
-    }
-    let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece; // not needed in this function
-    if is_last_piece {
-        num_blocks_per_piece = num_blocks_in_last_piece;
-    }
-
-    debug!("block_len = {}", block_len);
-    debug!("num_blocks_per_piece = {}", num_blocks_per_piece);
-    debug!("num_blocks_in_last_piece = {}", num_blocks_in_last_piece);
-    debug!("last_block_len = {}", last_block_len);
-    debug!("total_num_blocks = {}", total_num_blocks);
-
     // Support working with multiple peers at the same time
     let mut num_peers = min(MAX_PIPELINED_REQUESTS, num_blocks_per_piece);
-    if is_last_piece {
+    if is_last_piece.unwrap() {
         num_peers = num_blocks_in_last_piece;
     }
     num_peers = min(peers.len(), num_peers);
@@ -202,6 +176,9 @@ pub async fn download_piece(
     let block_iters =
         num_blocks_per_piece / work_peers.len() + num_blocks_per_piece % work_peers.len();
 
+    // For validating the hash of the received piece
+    let mut hasher = Sha1::new();
+
     // The combined loop counter - from both loops; represents the block ordinal number
     let mut i = 0usize;
 
@@ -211,7 +188,7 @@ pub async fn download_piece(
     // Fetch blocks from peers
 
     // Outer loop is by blocks, while the inner loop is by peers.
-    // I am not sure that this brings any speed improvements; it might.
+    // I am not sure that this brings any speed improvements; it might. todo
     'outer: for block_idx in 0..block_iters {
         for (peer_idx, peer) in work_peers.iter_mut().enumerate().take(num_peers) {
             if !check_bitfield(peer, piece_index) {
@@ -225,7 +202,7 @@ pub async fn download_piece(
             let index = piece_index as u32;
             let begin = u32::try_from(i * block_len)?;
             let mut length = block_len as u32;
-            if is_last_piece && i == num_blocks_per_piece - 1 {
+            if is_last_piece.unwrap() && i == num_blocks_per_piece - 1 {
                 length = last_block_len as u32;
             }
             let msg = Message::new(
@@ -277,35 +254,18 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     let file = File::create(output).await?;
     let mut file_writer = BufWriter::new(file);
 
-    // Perform the tracker GET request to get a list of peers
-    let (peers, info) = get_peers(torrent)?;
-    let mut peers = peers.0;
-
-    let file_len = info.length();
-    let piece_len = info.plen;
-    let mut last_piece_len = file_len % piece_len;
-    let num_pcs = file_len / piece_len + last_piece_len.clamp(0, 1);
-    if last_piece_len == 0 {
-        last_piece_len = piece_len;
-    }
-    debug!("file_len = {}", file_len);
-    debug!("piece_len = {}", piece_len);
-    debug!("last_piece_len = {}", last_piece_len);
-    debug!("num_pcs = {}", num_pcs);
-
-    let block_len = BLOCK_SIZE;
-    let mut num_blocks_per_piece = piece_len / block_len;
-    let mut last_block_len = last_piece_len % block_len;
-    let num_blocks_in_last_piece = last_piece_len / block_len + last_block_len.clamp(0, 1);
-    if last_block_len == 0 {
-        last_block_len = block_len;
-    }
-    let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece;
-    debug!("block_len = {}", block_len);
-    debug!("num_blocks_per_piece = {}", num_blocks_per_piece);
-    debug!("num_blocks_in_last_piece = {}", num_blocks_in_last_piece);
-    debug!("last_block_len = {}", last_block_len);
-    debug!("total_num_blocks = {}", total_num_blocks);
+    let WorkParams {
+        mut peers,
+        info,
+        file_len,
+        num_pcs,
+        block_len,
+        mut num_blocks_per_piece,
+        num_blocks_in_last_piece,
+        last_block_len,
+        total_num_blocks,
+        ..
+    } = get_work_params(torrent, None)?;
 
     // Support working with multiple peers at the same time
     let mut num_peers = min(MAX_PIPELINED_REQUESTS, num_blocks_per_piece);
@@ -323,17 +283,9 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
 
         debug!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
-        // let mut stream = peer
-        //     .stream
-        //     .unwrap_or_else(|| panic!("Expected to get a stream from the peer {}", peer.addr)); todo rem
-
         // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
 
         // Receive a Bitfield message (it is optional in general case, so we can improve this)
-        // let msg = stream todo rem
-        //     .next()
-        //     .await
-        //     .context("Receive a Bitfield message")??;
         let msg = peer.recv_msg().await.context("Bitfield")?;
         debug!("01 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Bitfield {
@@ -348,23 +300,14 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
         // Send the Interested message
         let msg = Message::new(MessageId::Interested, None);
         peer.send_msg(msg).await.context("Interested")?;
-        // stream
-        //     .send(msg)
-        //     .await
-        //     .context("Send the Interested message")?; todo rem
 
         // Receive an Unchoke message
         let msg = peer.recv_msg().await.context("Unchoke")?;
-        // let msg = stream
-        //     .next()
-        //     .await
-        //     .context("Receive an Unchoke message")??; todo rem
         debug!("02 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Unchoke {
             return Err(PeerError::from((msg.id, MessageId::Unchoke)));
         }
 
-        // streams.push(stream);todo rem
         work_peers.push(peer);
     }
 
@@ -413,14 +356,6 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
                     return Err(PeerError::MissingPiece(peer.addr, piece_index));
                 }
 
-                // todo rem
-                // let stream = peer.stream.as_mut().unwrap_or_else(|| {
-                //     panic!(
-                //         "Expected the peer {} to have its stream field populated",
-                //         peer.addr
-                //     )
-                // });
-
                 // Exchange messages with the peer
 
                 // Send a Request message for each block - we don't request pieces but blocks.
@@ -438,7 +373,6 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
                     "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
                     peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
                 );
-                // debug!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}");//todo rem
                 eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
                 peer.send_msg(msg).await.context("Request")?;
 
@@ -491,6 +425,69 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
     Ok(())
 }
 
+/// Calculates and returns basic work parameters
+fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<WorkParams, PeerError> {
+    // Perform the tracker GET request to get a list of peers
+    let (peers, info) = get_peers(torrent)?;
+    let peers = peers.0;
+
+    // The file to download is split into pieces of same fixed length,
+    // which is defined in torrent file and is a power of two,
+    // except potentially for the last piece which can be smaller.
+    // File ultimately needs to be assembled from received pieces, but this function is not meant for that.
+    // The file size is also provided in the torrent file.
+    let file_len = info.length();
+    let piece_len = info.plen;
+    let mut last_piece_len = file_len % piece_len;
+    let num_pcs = file_len / piece_len + last_piece_len.clamp(0, 1);
+    if last_piece_len == 0 {
+        last_piece_len = piece_len;
+    }
+
+    let is_last_piece = piece_index.map(|piece_index| piece_index == num_pcs - 1);
+
+    debug!("piece_index = {:?}", piece_index);
+    debug!("file_len = {}", file_len);
+    debug!("piece_len = {}", piece_len);
+    debug!("last_piece_len = {}", last_piece_len);
+    debug!("num_pcs = {}", num_pcs);
+    debug!("is_last_piece = {:?}", is_last_piece);
+
+    // Pieces are split into blocks and transferred as such.
+    // Pieces ultimately need to be assembled from received blocks.
+    // Block size is 16 kB (`BLOCK_SIZE`), except potentially for the last block which can be smaller.
+    let block_len = BLOCK_SIZE;
+    let mut num_blocks_per_piece = piece_len / block_len;
+    let mut last_block_len = last_piece_len % block_len;
+    let num_blocks_in_last_piece = last_piece_len / block_len + last_block_len.clamp(0, 1);
+    if last_block_len == 0 {
+        last_block_len = block_len;
+    }
+    let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece; // not needed in this function
+    if is_last_piece.is_some() && is_last_piece.unwrap() {
+        num_blocks_per_piece = num_blocks_in_last_piece;
+    }
+
+    debug!("block_len = {}", block_len);
+    debug!("num_blocks_per_piece = {}", num_blocks_per_piece);
+    debug!("num_blocks_in_last_piece = {}", num_blocks_in_last_piece);
+    debug!("last_block_len = {}", last_block_len);
+    debug!("total_num_blocks = {}", total_num_blocks);
+
+    Ok(WorkParams {
+        peers,
+        info,
+        file_len,
+        num_pcs,
+        is_last_piece,
+        block_len,
+        num_blocks_per_piece,
+        num_blocks_in_last_piece,
+        last_block_len,
+        total_num_blocks,
+    })
+}
+
 /// Check if the peer has the required piece.
 ///
 /// The challenge doesn't require this as all their peers have all the required pieces.
@@ -509,7 +506,7 @@ fn check_bitfield(peer: &Peer, piece_index: usize) -> bool {
     let byte = bitfield[idx];
     let sr: u8 = 7 - ((piece_index % 8) as u8);
     let piece_bit: u8 = byte >> sr;
-    // eprintln!("{bitfield:02X?}, {idx}, {byte:02X?}, {sr}, {piece_bit:02X?}"); //todo rem
+    // eprintln!("{bitfield:02X?}, {idx}, 0x{byte:02X?}, {sr}, 0x{piece_bit:02X}"); //todo rem
     if piece_bit & 1 != 1 {
         return false;
     }
