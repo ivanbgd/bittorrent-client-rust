@@ -342,8 +342,11 @@ async fn local_get_peers(work_params: WorkParams) -> Result<(Vec<Peer>, usize), 
 
         // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
 
-        // Receive a Bitfield message (it is optional in general case, so we can improve this)
-        let msg = peer.recv_msg().await.context("Bitfield")?;
+        // Receive a Bitfield message (todo: it is optional in general case, so we can improve this)
+        let msg = peer
+            .recv_msg()
+            .await
+            .context("Receive a Bitfield message")?;
         debug!("01 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Bitfield {
             return Err(PeerError::from((msg.id, MessageId::Bitfield)));
@@ -356,10 +359,15 @@ async fn local_get_peers(work_params: WorkParams) -> Result<(Vec<Peer>, usize), 
 
         // Send the Interested message
         let msg = Message::new(MessageId::Interested, None);
-        peer.send_msg(msg).await.context("Interested")?;
+        peer.send_msg(msg)
+            .await
+            .context("Send the Interested message")?;
 
         // Receive an Unchoke message
-        let msg = peer.recv_msg().await.context("Unchoke")?;
+        let msg = peer
+            .recv_msg()
+            .await
+            .context("Receive an Unchoke message")?;
         debug!("02 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Unchoke {
             return Err(PeerError::from((msg.id, MessageId::Unchoke)));
@@ -396,7 +404,7 @@ struct BlockParams<'a> {
 
 // TODO: Work on a block basis
 // ///Gets a single block (sub-piece) from a peer and returns it.
-// ) -> Result<Block, PeerError> {
+// async fn get_block(...) -> Result<Block, PeerError> {...}
 
 // /// Gets a single piece from multiple peers and returns it. // todo rem
 /// Gets a single piece from a single peer and returns it.
@@ -428,20 +436,36 @@ async fn get_piece(
 
     let data = vec![];
 
-    // Fetch blocks from peers
+    // Fetch blocks from a single peer - todo: change comment to multiple peers
 
     ///////////////////////////////////////////////////////////////////////////////
     // TODO: Use block indices and assemble them in order.
     // What we currently have works, because we work with only one peer, but messages can in general
     // be received out of order over the network, in either way.
 
-    let peer_idx = 0;
-    let peer = &mut work_peers[peer_idx];
-
-    if !check_bitfield(peer, *piece_index) {
-        // TODO: Don't return, but mark the piece for retry, and do retry somehow - with another peer.
-        return Err(PeerError::MissingPiece(peer.addr, *piece_index));
+    // Check all peers for the given piece and try to find one that has it: the single-peer variant
+    // todo for multi-peer (we still work with only one peer)
+    let mut pi = 0;
+    let (peer_idx, peer, found) = loop {
+        let p = &mut work_peers[pi];
+        if check_bitfield(p, *piece_index) {
+            break (pi, p, true);
+        }
+        info!("{}", PeerError::MissingPiece(p.addr, *piece_index));
+        if pi == work_peers.len() - 1 {
+            break (0, &mut work_peers[0], false);
+        }
+        pi += 1;
+    };
+    if !found {
+        return Err(PeerError::NoPeerHasPiece(*piece_index));
     }
+
+    // todo rem
+    // if !check_bitfield(peer, *piece_index) {
+    //     // TODO: Don't return, but mark the piece for retry, and do retry somehow - with another peer.
+    //     return Err(PeerError::MissingPiece(peer.addr, *piece_index));
+    // }
 
     let num_reqs = min(MAX_PIPELINED_REQUESTS, *num_blocks_per_piece);
 
@@ -501,7 +525,8 @@ async fn get_piece(
     }
     ///////////////////////////////////////////////////////////////////////////////
 
-    // TODO: pipeline by blocks but with multiple peers this time
+    // TODO: pipeline by blocks but with multiple peers this time (or by pieces?)
+    // todo: three nested loops?
 
     // // Outer loop is by blocks, while the inner loop is by peers.
     // // I am not sure that this brings any speed improvements; it might. todo

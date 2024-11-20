@@ -79,6 +79,9 @@ pub enum PeerError {
     #[error("The peer {0} doesn't have the piece index {1}")]
     MissingPiece(SocketAddrV4, usize),
 
+    #[error("No peer has the piece index {0}")]
+    NoPeerHasPiece(usize),
+
     #[error("Wrong piece index: {0}; expected index < {1}")]
     WrongPieceIndex(usize, usize),
 
