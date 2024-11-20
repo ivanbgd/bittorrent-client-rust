@@ -41,7 +41,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// Creates a new [`Peer`] object by taking the peer's IP address and port
+    /// Creates a new [`Peer`] object by taking the peer's IP address and port.
     pub(crate) fn new(addr: &SocketAddrV4) -> Self {
         Self {
             addr: *addr,
@@ -101,8 +101,11 @@ impl Peer {
         Ok(())
     }
 
-    /// Send a message to a peer
-    pub(crate) async fn send_msg(&mut self, msg: Message) -> Result<(), PeerError> {
+    /// Sends a message to a peer.
+    ///
+    /// This includes flushing into the sink, so it is usually better to batch together messages to send
+    /// via [`Peer::feed`] or [`Peer::send_all`] rather than flushing between each message.
+    pub(crate) async fn _send(&mut self, msg: Message) -> Result<(), PeerError> {
         let stream = self.stream.as_mut().unwrap_or_else(|| {
             panic!(
                 "Expected the peer {} to have its stream field populated",
@@ -113,7 +116,44 @@ impl Peer {
         Ok(())
     }
 
-    /// Receive a message from a peer
+    /// Flush the sink, processing all pending messages.
+    ///
+    /// This adapter is intended to be used when we want to stop sending
+    /// to the peer until all current requests are processed.
+    ///
+    /// Meant for working with a batch of message requests, rather than
+    /// with single messages, for increased speed.
+    pub(crate) async fn flush(&mut self) -> Result<(), PeerError> {
+        let stream = self.stream.as_mut().unwrap_or_else(|| {
+            panic!(
+                "Expected the peer {} to have its stream field populated",
+                self.addr
+            )
+        });
+        stream.flush().await.context("flush messages to the peer")?;
+        Ok(())
+    }
+
+    /// Feeds a message to a peer.
+    ///
+    /// Unlike [`Peer::_send`], does not flush messages to the peer.
+    /// It is the caller’s responsibility to ensure all pending messages are processed,
+    /// which can be done via [`Peer::flush`].
+    ///
+    /// Meant for working with a batch of message requests, rather than
+    /// with single messages, for increased speed.
+    pub(crate) async fn feed(&mut self, msg: Message) -> Result<(), PeerError> {
+        let stream = self.stream.as_mut().unwrap_or_else(|| {
+            panic!(
+                "Expected the peer {} to have its stream field populated",
+                self.addr
+            )
+        });
+        stream.feed(msg).await.context("feed a message")?;
+        Ok(())
+    }
+
+    /// Receives a message from a peer.
     pub(crate) async fn recv_msg(&mut self) -> Result<Message, PeerError> {
         let stream = self.stream.as_mut().unwrap_or_else(|| {
             panic!(

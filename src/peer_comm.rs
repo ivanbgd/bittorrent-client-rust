@@ -30,6 +30,7 @@ use std::net::SocketAddrV4;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use futures_util::SinkExt;
 use log::{debug, info};
 use sha1::{Digest, Sha1};
 use tokio::fs::File;
@@ -359,9 +360,8 @@ async fn local_get_peers(work_params: WorkParams) -> Result<(Vec<Peer>, usize), 
 
         // Send the Interested message
         let msg = Message::new(MessageId::Interested, None);
-        peer.send_msg(msg)
-            .await
-            .context("Send the Interested message")?;
+        peer.feed(msg).await.context("Interested")?;
+        peer.flush().await.context("Interested")?;
 
         // Receive an Unchoke message
         let msg = peer
@@ -467,9 +467,8 @@ async fn get_piece(
     //     return Err(PeerError::MissingPiece(peer.addr, *piece_index));
     // }
 
-    // let num_reqs = min(MAX_PIPELINED_REQUESTS, *num_blocks_per_piece);
-    // let num_reqs = MAX_PIPELINED_REQUESTS;
-    let num_reqs = *num_blocks_per_piece;
+    // let num_reqs = min(MAX_PIPELINED_REQUESTS, *num_blocks_per_piece); // todo rem
+    let num_reqs = MAX_PIPELINED_REQUESTS;
 
     // Pipeline requests to a single peer.
     // Outer loop is by blocks, while the inner loop is by requests to the single peer.
@@ -497,7 +496,7 @@ async fn get_piece(
                  peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
             );
             eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
-            peer.send_msg(msg).await.context("Request")?;
+            peer.feed(msg).await.context("Request")?;
 
             if i == *num_blocks_per_piece - 1 {
                 break;
@@ -505,7 +504,7 @@ async fn get_piece(
             i += 1;
             j += 1;
         }
-
+        peer.flush().await.context("Request")?;
         i -= j;
 
         // Receive a Piece message for each block we've requested in a row.

@@ -57,7 +57,7 @@ pub const KEEP_ALIVE_PERIOD_SECS: u64 = 120;
 pub const BLOCK_SIZE: usize = 1 << 14;
 
 /// Maximal number of requests pipelined at once
-pub const MAX_PIPELINED_REQUESTS: usize = 5;
+pub const MAX_PIPELINED_REQUESTS: usize = 32;
 
 /// Maximal message frame size in bytes, 64 kB
 pub const MAX_FRAME_SIZE: usize = 1 << 16;
