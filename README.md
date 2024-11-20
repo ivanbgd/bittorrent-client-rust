@@ -74,6 +74,8 @@ The assignment itself only supports the compact mode.
 - Logging.
 - We check the Bitfield message payload to see whether a peer has the piece that we need.
     - The challenge doesn't require this as all their peers have all the required pieces during testing.
+- We pipeline requests to a single peer for increased download speed. This was suggested as optional
+  but is practically required because of the test timeout. This increases the download speed significantly.
 
 # Possible Improvements
 
