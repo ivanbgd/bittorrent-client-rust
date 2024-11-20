@@ -46,7 +46,7 @@ Note: This section is for stages 2 and beyond.
 
 We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
 
-To enable the logging facility, first set the logging level by executing
+To enable the provided logging facility, first set the logging level by executing
 `RUST_LOG=debug` or `RUST_LOG=info`, for example.
 
 Sample torrent files are provided in the root of the repository,
@@ -69,6 +69,14 @@ We only support compact mode, but that is the recommended mode in practice anywa
 https://www.bittorrent.org/beps/bep_0023.html  
 The assignment itself only supports the compact mode.
 
-# Possible improvements
+# Improvements Over the Requirements
 
-- The Bitfiled message is optional, and a peer doesn't need to send it in case it doesn't have any piece. 
+- Logging.
+- We check the Bitfield message payload to see whether a peer has the piece that we need.
+    - The challenge doesn't require this as all their peers have all the required pieces during testing.
+
+# Possible Improvements
+
+- The Bitfiled message is optional, and a peer doesn't need to send it in case it doesn't have any piece,
+  so we should first check if the peer has sent it to us or not. Right now we assume it has, because
+  the challenge peers do that during testing.

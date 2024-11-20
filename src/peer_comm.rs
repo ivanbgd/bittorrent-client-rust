@@ -131,62 +131,24 @@ pub async fn download_piece(
     let (mut work_peers, block_iters) = local_get_peers(work_params).await?;
     let num_peers = work_peers.len();
 
-    // For validating the hash of the received piece
-    let mut hasher = Sha1::new();
+    let piece_hash = &info.pieces.0[piece_index];
 
-    // The combined loop counter - from both loops; represents the block ordinal number
-    let mut i = 0usize;
+    // Block index - for logging purposes only
+    let mut block = 0usize;
 
-    // Fetch blocks from peers
+    let block_params = BlockParams {
+        block_iters,
+        num_peers,
+        is_last_piece: is_last_piece.unwrap(),
+        block_len,
+        num_blocks_per_piece,
+        last_block_len,
+        total_num_blocks: num_blocks_per_piece,
+        piece_index,
+        piece_hash,
+    };
 
-    // Outer loop is by blocks, while the inner loop is by peers.
-    // I am not sure that this brings any speed improvements; it might. todo
-    'outer: for block_idx in 0..block_iters {
-        for (peer_idx, peer) in work_peers.iter_mut().enumerate().take(num_peers) {
-            if !check_bitfield(peer, piece_index) {
-                // TODO: Don't return, but mark the piece for retry, and do retry somehow.
-                return Err(PeerError::MissingPiece(peer.addr, piece_index));
-            }
-
-            // Exchange messages with the peer
-
-            // Send a Request message for each block - we don't request pieces but blocks.
-            let index = piece_index as u32;
-            let begin = u32::try_from(i * block_len)?;
-            let mut length = block_len as u32;
-            if is_last_piece.unwrap() && i == num_blocks_per_piece - 1 {
-                length = last_block_len as u32;
-            }
-            let msg = Message::new(
-                MessageId::Request,
-                Some(RequestPayload::new(index, begin, length).into()),
-            );
-            debug!("i = {i}: block_idx = {block_idx}, peer_idx = {peer_idx}; piece index = {index}, begin = {begin}, length = {length}");
-            peer.send_msg(msg).await.context("Request")?;
-
-            // Wait for a Piece message for each block we've requested.
-            let msg = peer.recv_msg().await.context("Piece")?;
-            if msg.id != MessageId::Piece {
-                return Err(PeerError::from((msg.id, MessageId::Piece)));
-            }
-
-            let payload = &msg.payload.expect("Expected to have received some payload")[8..];
-            hasher.update(payload);
-            file_writer.write_all(payload).await?;
-
-            if i == num_blocks_per_piece - 1 {
-                break 'outer;
-            }
-
-            i += 1;
-        }
-    }
-
-    let piece = hex::encode(info.pieces.0[piece_index]);
-    let hash = hex::encode(hasher.finalize());
-    if piece != hash {
-        return Err(PeerError::HashMismatch(piece, hash));
-    }
+    let _piece = get_piece(&block_params, &mut work_peers, &mut block, &mut file_writer).await?;
 
     file_writer.flush().await?;
 
@@ -244,69 +206,20 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
             num_peers = min(peers.len(), num_peers);
         }
 
-        // For validating the hash of the received piece
-        let mut hasher = Sha1::new();
+        let block_params = BlockParams {
+            block_iters,
+            num_peers,
+            is_last_piece,
+            block_len,
+            num_blocks_per_piece,
+            last_block_len,
+            total_num_blocks,
+            piece_index,
+            piece_hash,
+        };
 
-        // The combined loop counter - from both loops; represents the block ordinal number
-        let mut i = 0usize;
-
-        // Fetch blocks from peers
-
-        // Outer loop is by blocks, while the inner loop is by peers.
-        // I am not sure that this brings any speed improvements; it might. todo
-        'outer: for block_idx in 0..block_iters {
-            for (peer_idx, peer) in work_peers.iter_mut().enumerate().take(num_peers) {
-                block += 1;
-
-                if !check_bitfield(peer, piece_index) {
-                    // TODO: Don't return, but mark the piece for retry, and do retry somehow.
-                    return Err(PeerError::MissingPiece(peer.addr, piece_index));
-                }
-
-                // Exchange messages with the peer
-
-                // Send a Request message for each block - we don't request pieces but blocks.
-                let index = piece_index as u32;
-                let begin = u32::try_from(i * block_len)?;
-                let mut length = block_len as u32;
-                if is_last_piece && i == num_blocks_per_piece - 1 {
-                    length = last_block_len as u32;
-                }
-                let msg = Message::new(
-                    MessageId::Request,
-                    Some(RequestPayload::new(index, begin, length).into()),
-                );
-                debug!(
-                    "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
-                    peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
-                );
-                eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
-                peer.send_msg(msg).await.context("Request")?;
-
-                // Wait for a Piece message for each block we've requested.
-                let msg = peer.recv_msg().await.context("Piece")?;
-                if msg.id != MessageId::Piece {
-                    return Err(PeerError::from((msg.id, MessageId::Piece)));
-                }
-
-                let payload = &msg.payload.expect("Expected to have received some payload")[8..];
-                hasher.update(payload);
-                file_writer.write_all(payload).await?;
-                // contents.extend(payload);todo
-
-                if i == num_blocks_per_piece - 1 {
-                    break 'outer;
-                }
-
-                i += 1;
-            }
-        }
-
-        let piece = hex::encode(piece_hash);
-        let hash = hex::encode(hasher.finalize());
-        if piece != hash {
-            return Err(PeerError::HashMismatch(piece, hash));
-        }
+        let _piece =
+            get_piece(&block_params, &mut work_peers, &mut block, &mut file_writer).await?;
 
         info!(
             "piece {:2}/{num_pcs} downloaded and stored",
@@ -370,7 +283,7 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
     if last_block_len == 0 {
         last_block_len = block_len;
     }
-    let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece; // not needed in this function
+    let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece;
     if is_last_piece.is_some() && is_last_piece.unwrap() {
         num_blocks_per_piece = num_blocks_in_last_piece;
     }
@@ -465,6 +378,134 @@ async fn local_get_peers(work_params: WorkParams) -> Result<(Vec<Peer>, usize), 
     Ok((work_peers, block_iters))
 }
 
+#[derive(Debug)]
+struct BlockParams<'a> {
+    // work_peers: &'a Vec<Peer>, // todo rem
+    block_iters: usize,
+    num_peers: usize,
+    is_last_piece: bool,
+    block_len: usize,
+    num_blocks_per_piece: usize,
+    last_block_len: usize,
+    total_num_blocks: usize,
+    // block: &'a mut usize, // todo rem
+    piece_index: usize,
+    piece_hash: &'a [u8; SHA1_LEN],
+    // file_writer: BufWriter<File>, // todo rem
+}
+
+// TODO: Work on a block basis
+// ///Gets a single block (sub-piece) from a peer and returns it.
+// ) -> Result<Block, PeerError> {
+
+/// Gets a single piece from multiple peers and returns it.
+// todo: don't write to file in the function
+async fn get_piece(
+    block_params: &BlockParams<'_>,
+    work_peers: &mut [Peer],
+    block: &mut usize,
+    file_writer: &mut BufWriter<File>,
+) -> Result<Piece, PeerError> {
+    let BlockParams {
+        block_iters,
+        num_peers,
+        is_last_piece,
+        block_len,
+        num_blocks_per_piece,
+        last_block_len,
+        total_num_blocks,
+        piece_index,
+        piece_hash,
+    } = block_params;
+
+    // For validating the hash of the received piece
+    let mut hasher = Sha1::new();
+
+    // The combined loop counter - from both loops; represents the block ordinal number
+    let mut i = 0usize;
+
+    let data = vec![];
+
+    // Fetch blocks from peers
+
+    // Outer loop is by blocks, while the inner loop is by peers.
+    // I am not sure that this brings any speed improvements; it might. todo
+    'outer: for block_idx in 0..*block_iters {
+        for (peer_idx, peer) in work_peers.iter_mut().enumerate().take(*num_peers) {
+            *block += 1;
+
+            if !check_bitfield(peer, *piece_index) {
+                // TODO: Don't return, but mark the piece for retry, and do retry somehow.
+                return Err(PeerError::MissingPiece(peer.addr, *piece_index));
+            }
+
+            // Exchange messages with the peer
+
+            // Send a Request message for each block - we don't request pieces but blocks.
+            let index = *piece_index as u32;
+            let begin = u32::try_from(i * *block_len)?;
+            let mut length = *block_len as u32;
+            if *is_last_piece && i == *num_blocks_per_piece - 1 {
+                length = *last_block_len as u32;
+            }
+            let msg = Message::new(
+                MessageId::Request,
+                Some(RequestPayload::new(index, begin, length).into()),
+            );
+            debug!(
+                "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
+                    peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
+            );
+            eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
+            peer.send_msg(msg).await.context("Request")?;
+
+            // Wait for a Piece message for each block we've requested.
+            let msg = peer.recv_msg().await.context("Piece")?;
+            if msg.id != MessageId::Piece {
+                return Err(PeerError::from((msg.id, MessageId::Piece)));
+            }
+
+            let payload = &msg.payload.expect("Expected to have received some payload")[8..];
+            hasher.update(payload); //todo
+            file_writer.write_all(payload).await?; //todo
+                                                   // contents.extend(payload);todo rem
+
+            if i == *num_blocks_per_piece - 1 {
+                break 'outer;
+            }
+
+            i += 1;
+        }
+    }
+
+    let piece = hex::encode(piece_hash);
+    let hash = hex::encode(hasher.finalize());
+    if piece != hash {
+        return Err(PeerError::HashMismatch(piece, hash));
+    }
+
+    // Ok(Block {
+    //     piece: *piece_index,
+    //     block: *block,
+    //     data,
+    // })
+    Ok(Piece {
+        piece: *piece_index,
+        data,
+    })
+}
+
+struct Piece {
+    piece: usize,
+    data: Vec<u8>,
+}
+
+struct Block {
+    piece: usize,
+    block: usize,
+    data: Vec<u8>,
+}
+
 /// Check if the peer has the required piece.
 ///
 /// The challenge doesn't require this as all their peers have all the required pieces.
@@ -489,7 +530,7 @@ fn check_bitfield(peer: &Peer, piece_index: usize) -> bool {
     true
 }
 
-// // TODO: Move to a separate (new) file.
+// // TODO: rem
 // pub struct Piece {
 //     index: usize,
 //     data: Vec<u8>,
@@ -497,6 +538,7 @@ fn check_bitfield(peer: &Peer, piece_index: usize) -> bool {
 //     calc_hash: String,    // todo: not necessary?
 // }
 
+// // TODO: rem
 // /// A helper function that is used for exchanging messages with the peers
 // /// for getting blocks (sub-pieces) of data from them.
 // ///
