@@ -468,7 +468,8 @@ async fn get_piece(
     // }
 
     // let num_reqs = min(MAX_PIPELINED_REQUESTS, *num_blocks_per_piece);
-    let num_reqs = MAX_PIPELINED_REQUESTS;
+    // let num_reqs = MAX_PIPELINED_REQUESTS;
+    let num_reqs = *num_blocks_per_piece;
 
     // Pipeline requests to a single peer.
     // Outer loop is by blocks, while the inner loop is by requests to the single peer.
