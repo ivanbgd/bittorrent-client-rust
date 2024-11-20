@@ -101,21 +101,6 @@ impl Peer {
         Ok(())
     }
 
-    /// Sends a message to a peer.
-    ///
-    /// This includes flushing into the sink, so it is usually better to batch together messages to send
-    /// via [`Peer::feed`] or [`Peer::send_all`] rather than flushing between each message.
-    pub(crate) async fn _send(&mut self, msg: Message) -> Result<(), PeerError> {
-        let stream = self.stream.as_mut().unwrap_or_else(|| {
-            panic!(
-                "Expected the peer {} to have its stream field populated",
-                self.addr
-            )
-        });
-        stream.send(msg).await.context("send a message")?;
-        Ok(())
-    }
-
     /// Flush the sink, processing all pending messages.
     ///
     /// This adapter is intended to be used when we want to stop sending
@@ -150,6 +135,21 @@ impl Peer {
             )
         });
         stream.feed(msg).await.context("feed a message")?;
+        Ok(())
+    }
+
+    /// Sends a message to a peer.
+    ///
+    /// This includes flushing into the sink, so it is usually better to batch together messages to send
+    /// via [`Peer::feed`] or [`Peer::send_all`] rather than flushing between each message.
+    pub(crate) async fn _send(&mut self, msg: Message) -> Result<(), PeerError> {
+        let stream = self.stream.as_mut().unwrap_or_else(|| {
+            panic!(
+                "Expected the peer {} to have its stream field populated",
+                self.addr
+            )
+        });
+        stream.send(msg).await.context("send a message")?;
         Ok(())
     }
 
