@@ -448,7 +448,7 @@ async fn get_piece(
     let mut pi = 0;
     let (peer_idx, peer, found) = loop {
         let p = &mut work_peers[pi];
-        if check_bitfield(p, *piece_index) {
+        if peer_has_piece(p, *piece_index) {
             break (pi, p, true);
         }
         info!("{}", PeerError::MissingPiece(p.addr, *piece_index));
@@ -462,12 +462,13 @@ async fn get_piece(
     }
 
     // todo rem
-    // if !check_bitfield(peer, *piece_index) {
+    // if !does_peer_have_piece(peer, *piece_index) {
     //     // TODO: Don't return, but mark the piece for retry, and do retry somehow - with another peer.
     //     return Err(PeerError::MissingPiece(peer.addr, *piece_index));
     // }
 
-    let num_reqs = min(MAX_PIPELINED_REQUESTS, *num_blocks_per_piece);
+    // let num_reqs = min(MAX_PIPELINED_REQUESTS, *num_blocks_per_piece);
+    let num_reqs = MAX_PIPELINED_REQUESTS;
 
     // Pipeline requests to a single peer.
     // Outer loop is by blocks, while the inner loop is by requests to the single peer.
@@ -606,17 +607,19 @@ struct Block {
     data: Vec<u8>,
 }
 
-/// Check if the peer has the required piece.
+/// Checks if the peer has the required piece.
+///
+/// Returns `true` if it does, and `false` if it does not.
 ///
 /// The challenge doesn't require this as all their peers have all the required pieces.
 ///
 /// The Bitfield message is variable length. The high bit in the first byte corresponds to piece index 0.
 /// Bits that are cleared indicated a missing piece, and set bits indicate a valid and available piece.
 /// Spare bits at the end are set to zero.
-fn check_bitfield(peer: &Peer, piece_index: usize) -> bool {
+fn peer_has_piece(peer: &Peer, piece_index: usize) -> bool {
     let bitfield = peer.bitfield.as_ref().unwrap_or_else(|| {
         panic!(
-            "Expected the peer {} to have its bitfield field populated",
+            "Expected the peer {} to have its bitfield field populated.",
             peer.addr
         )
     });
