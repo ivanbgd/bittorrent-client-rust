@@ -16,7 +16,7 @@ use crate::constants::SHA1_LEN;
 /// each of which is the SHA1 hash of the piece at the corresponding index.
 ///
 /// Implemented as vector of 20-byte arrays.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pieces(pub Vec<[u8; SHA1_LEN]>);
 
 struct PiecesVisitor;

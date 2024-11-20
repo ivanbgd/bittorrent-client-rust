@@ -141,7 +141,7 @@ impl Display for MetaInfo {
 /// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
 ///
 /// Currently, only the single-file torrents are supported.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Info {
     /// Single-file or multiple-file torrent
     #[serde(flatten)]
@@ -191,7 +191,7 @@ impl Info {
 /// In the multiple file case, `files` contains all files' info.
 ///
 /// Currently, only the single-file torrents are supported.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Mode {
     /// Single-file torrent
@@ -210,7 +210,7 @@ pub enum Mode {
 ///
 /// Applicable to [`Mode::MultipleFile`] only.
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct File {
     /// A list containing one or more string elements that together represent the path and filename
     ///
