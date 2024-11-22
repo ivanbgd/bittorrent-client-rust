@@ -82,3 +82,6 @@ The assignment itself only supports the compact mode.
 - The Bitfiled message is optional, and a peer doesn't need to send it in case it doesn't have any piece,
   so we should first check if the peer has sent it to us or not. Right now we assume it has, because
   the challenge peers do that during testing.
+- Discover new peers at regular time intervals, but this is not required in the challenge.
+- The [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf) (PDF) has more ideas,
+  but none of them are required in this challenge.

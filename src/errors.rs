@@ -76,9 +76,11 @@ pub enum PeerError {
     #[error("Wrong message ID: {0}; expected {1}")]
     WrongMessageId(MessageId, MessageId),
 
+    /// The peer doesn't have the piece.
     #[error("The peer {0} doesn't have the piece index {1}")]
     MissingPiece(SocketAddrV4, usize),
 
+    /// No peer has the required piece.
     #[error("No peer has the piece index {0}")]
     NoPeerHasPiece(usize),
 

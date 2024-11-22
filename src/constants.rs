@@ -56,7 +56,10 @@ pub const KEEP_ALIVE_PERIOD_SECS: u64 = 120;
 /// Size of a block (sub-piece) in bytes, 16 kB
 pub const BLOCK_SIZE: usize = 1 << 14;
 
-/// Maximal number of requests pipelined at once
+/// Maximum number of peers to work with
+pub const MAX_NUM_PEERS: usize = 32;
+
+/// Maximum number of block (sub-piece) requests pipelined at once
 pub const MAX_PIPELINED_REQUESTS: usize = 32;
 
 /// Maximal message frame size in bytes, 64 kB
