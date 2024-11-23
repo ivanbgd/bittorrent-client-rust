@@ -38,9 +38,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::config::Config;
-use crate::constants::{BLOCK_SIZE, SHA1_LEN};
+use crate::constants::{BLOCK_SIZE, MAX_PIECE_SIZE, SHA1_LEN};
 use crate::errors::PeerError;
-use crate::message::{Message, MessageId, RequestPayload};
+use crate::message::{Message, MessageId, PiecePayload, RequestPayload};
 use crate::meta_info::Info;
 use crate::peer::Peer;
 use crate::tracker::get_peers;
@@ -148,7 +148,7 @@ pub async fn download_piece(
     // Block index - for logging purposes only
     let mut block = 0usize;
 
-    let block_params = BlockParams {
+    let mut block_params = BlockParams {
         // block_iters, // todo rem
         // num_peers, // todo rem
         is_last_piece: is_last_piece.unwrap(),
@@ -160,10 +160,18 @@ pub async fn download_piece(
         piece_hash,
     };
 
-    let piece = fetch_piece(&config, &block_params, peer_idx, peer, &mut block).await?;
+    fetch_piece(
+        &config,
+        &mut block_params,
+        peer_idx,
+        peer,
+        &mut block,
+        &mut file_writer,
+    )
+    .await?;
 
-    file_writer.write_all(&piece.data).await?;
-    file_writer.flush().await?;
+    // file_writer.write_all(&piece.data).await?;
+    // file_writer.flush().await?; // todo rem
 
     check_file_size(current_piece_len, output).await?;
 
@@ -229,7 +237,7 @@ pub async fn download(
             // num_peers = min(peers.len(), num_peers); // todo rem
         }
 
-        let block_params = BlockParams {
+        let mut block_params = BlockParams {
             // block_iters, // todo rem
             // num_peers, // todo rem
             is_last_piece,
@@ -248,9 +256,17 @@ pub async fn download(
         ///////
 
         // let piece = fetch_piece(&block_params, &mut work_peers, &mut block).await?; // todo rem
-        let piece = fetch_piece(&config, &block_params, peer_idx, peer, &mut block).await?;
+        fetch_piece(
+            &config,
+            &mut block_params,
+            peer_idx,
+            peer,
+            &mut block,
+            &mut file_writer,
+        )
+        .await?;
 
-        file_writer.write_all(&piece.data).await?;
+        // file_writer.write_all(&piece.data).await?; // todo rem
 
         info!(
             "piece {:2}/{num_pcs} downloaded and stored",
@@ -259,12 +275,13 @@ pub async fn download(
         eprintln!("piece {:2}/{num_pcs} downloaded", piece_index + 1); //todo rem
     }
 
-    file_writer.flush().await?;
+    // file_writer.flush().await?; // todo rem
 
     check_file_size(file_len, output).await?;
 
     debug!("Took {:.3?} to complete.", start.elapsed());
     info!("Success!");
+    eprintln!("Success! Took {:.3?} to complete.", start.elapsed()); // todo: comment-out
 
     Ok(())
 }
@@ -283,7 +300,7 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
     let file_len = info.length();
     let piece_len = info.plen;
     let mut last_piece_len = file_len % piece_len;
-    let num_pcs = file_len / piece_len + last_piece_len.clamp(0, 1);
+    let num_pcs = file_len.div_ceil(piece_len);
     if last_piece_len == 0 {
         last_piece_len = piece_len;
     }
@@ -438,7 +455,7 @@ struct BlockParams<'a> {
     // block: &'a mut usize, // todo rem
     piece_index: usize,
     piece_hash: &'a [u8; SHA1_LEN],
-    // file_writer: BufWriter<File>, // todo rem
+    // file_writer: &'a BufWriter<File>, // todo rem
 }
 
 // TODO: Work on a block basis
@@ -447,6 +464,10 @@ struct BlockParams<'a> {
 
 /// Fetches a single piece from a single peer and returns it.
 ///
+/// Pieces are split into blocks of 16 kB or potentially less in case of the very last block,
+/// and transferred as such. The blocks are assembled into a full piece when all of them
+/// have been received.
+///
 /// Works with a single peer, but pipelines requests to it for increased download speed.
 ///
 /// This improves download speeds because it pipelines requests
@@ -454,7 +475,7 @@ struct BlockParams<'a> {
 /// Source (PDF): [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf)
 /// Also see: https://wiki.theory.org/BitTorrentSpecification#Queuing
 ///
-/// The piece is assembled in memory and returned as such after validating its hash.
+/// The piece is assembled in memory and written to storage as such after validating its hash.
 ///
 /// # Returns
 /// - [`Piece`], in case the peer has it, and we successfully received it and validated its hash value.
@@ -465,11 +486,13 @@ struct BlockParams<'a> {
 /// - [`PeerError::HashMismatch`], in case of bad hash value of the received piece.
 async fn fetch_piece(
     config: &Config,
-    block_params: &BlockParams<'_>,
+    block_params: &mut BlockParams<'_>,
     peer_idx: usize,
     peer: &mut Peer,
     block: &mut usize,
-) -> Result<Piece, PeerError> {
+    file_writer: &mut BufWriter<File>,
+) -> Result<(), PeerError> {
+    // ) -> Result<Piece, PeerError> {// todo: rem
     let BlockParams {
         // block_iters,
         // num_peers, // todo rem
@@ -484,7 +507,8 @@ async fn fetch_piece(
     } = block_params;
 
     // The entire Piece data
-    let mut data = Vec::with_capacity(*num_blocks_per_piece);
+    let mut data = Vec::with_capacity(*num_blocks_per_piece); // todo rem
+                                                              // let mut data = [0u8; MAX_PIECE_SIZE];
 
     // For validating the hash of the received piece
     let mut hasher = Sha1::new();
@@ -506,7 +530,7 @@ async fn fetch_piece(
     // let num_reqs = config.max_pipelined_requests; // todo rem
     let num_reqs = min(config.max_pipelined_requests, *num_blocks_per_piece);
     let block_iters =
-        num_blocks_per_piece / num_reqs + (num_blocks_per_piece % num_reqs).clamp(0, 1);
+        *num_blocks_per_piece / num_reqs + (*num_blocks_per_piece % num_reqs).clamp(0, 1);
     debug!("num_reqs = {num_reqs}, block_iters = {block_iters}");
 
     // Pipeline requests to a single peer.
@@ -553,9 +577,15 @@ async fn fetch_piece(
                 return Err(PeerError::from((msg.id, MessageId::Piece)));
             }
 
-            let payload = &msg.payload.expect("Expected to have received some payload")[8..];
-            hasher.update(payload);
-            data.extend(payload);
+            // let payload = &*msg.payload.expect("Expected to have received some payload");
+            // let payload: PiecePayload = payload.into();
+
+            let payload: PiecePayload = (&msg).into();
+
+            // let payload = &msg.payload.expect("Expected to have received some payload")[8..]; // todo rem
+            hasher.update(payload.block);
+            data.extend(payload.block); // todo rem
+                                        // data[..].copy_from_slice(payload.block);
 
             if i == *num_blocks_per_piece - 1 {
                 break 'outer;
@@ -563,6 +593,10 @@ async fn fetch_piece(
             i += 1;
         }
     }
+
+    file_writer.write_all(&data).await?;
+    file_writer.flush().await?;
+
     ///////////////////////////////////////////////////////////////////////////////
 
     // TODO: pipeline by blocks but with multiple peers this time (or by pieces?)
@@ -624,15 +658,18 @@ async fn fetch_piece(
         return Err(PeerError::HashMismatch(piece, hash));
     }
 
-    // Ok(Block {
+    // Ok(Block { // todo: rem
     //     piece: *piece_index,
     //     block: *block,
     //     data,
     // })
-    Ok(Piece {
-        piece: *piece_index,
-        data,
-    })
+
+    // Ok(Piece { // todo: rem
+    //     piece: *piece_index,
+    //     data,
+    // })
+
+    Ok(())
 }
 
 /// Compares the expected file size with the written file size.

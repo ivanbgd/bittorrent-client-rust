@@ -22,6 +22,7 @@ use std::fmt::{Display, Formatter};
 
 use anyhow::Result;
 use bytes::{Buf, BufMut, BytesMut};
+use log::warn;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::constants::MAX_FRAME_SIZE;
@@ -267,8 +268,6 @@ impl<'a> From<RequestPayload> for &'a [u8] {
     }
 }
 
-/// Unused.
-///
 /// Payload for the [`MessageId::Piece`] message
 ///
 /// The payload contains the following information:
@@ -277,9 +276,9 @@ impl<'a> From<RequestPayload> for &'a [u8] {
 ///   - block: block of data, which is a subset of the piece specified by index
 #[derive(Debug)]
 pub struct PiecePayload<'a> {
-    _index: u32,
-    _begin: u32,
-    _block: &'a [u8],
+    pub index: u32,
+    pub begin: u32,
+    pub block: &'a [u8],
 }
 
 impl<'a> PiecePayload<'a> {
@@ -287,9 +286,35 @@ impl<'a> PiecePayload<'a> {
     /// and block of data from a message received from a peer.
     pub fn new(index: u32, begin: u32, block: &'a [u8]) -> Self {
         Self {
-            _index: index,
-            _begin: begin,
-            _block: block,
+            index,
+            begin,
+            block,
+        }
+    }
+}
+
+/// Converts a reference to a [`MessageId::Piece`] into a [`PiecePayload`].
+impl<'a> From<&'a Message> for PiecePayload<'a> {
+    /// Converts a reference to a [`MessageId::Piece`] into a [`PiecePayload`].
+    fn from(value: &'a Message) -> PiecePayload {
+        let payload = &value
+            .payload
+            .as_ref()
+            .expect("Expected to have received some payload");
+
+        let msg_len = value.len as usize;
+        if msg_len != 1 + payload.len() {
+            warn!("piece message length {msg_len} != 1 + {}", payload.len()); // TODO: Add proper error handling. Implement [`TryFrom`] instead.
+        }
+
+        let index = u32::from_be_bytes(payload[0..4].try_into().expect("failed to convert index"));
+        let begin = u32::from_be_bytes(payload[4..8].try_into().expect("failed to convert begin"));
+        let block = &payload[8..];
+
+        Self {
+            index,
+            begin,
+            block,
         }
     }
 }
@@ -306,9 +331,9 @@ impl<'a> From<&'a [u8]> for PiecePayload<'a> {
         let block = &value[8..];
 
         Self {
-            _index: index,
-            _begin: begin,
-            _block: block,
+            index,
+            begin,
+            block,
         }
     }
 }

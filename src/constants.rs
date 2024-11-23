@@ -55,8 +55,12 @@ pub const TIMEOUT_SECS: u64 = 60;
 
 /// Keep-alive period (timeout) in seconds
 pub const KEEP_ALIVE_PERIOD_SECS: u64 = 120;
+
 /// Size of a block (sub-piece) in bytes, 16 kB
 pub const BLOCK_SIZE: usize = 1 << 14;
+
+/// Maximum size of a piece in bytes, 1 MB
+pub const MAX_PIECE_SIZE: usize = 1 << 20;
 
 /// Maximum number of peers to work with
 pub const MAX_NUM_PEERS: usize = 32;
