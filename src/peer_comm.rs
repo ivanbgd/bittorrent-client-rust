@@ -44,6 +44,7 @@ use crate::message::{Message, MessageId, PiecePayload, RequestPayload};
 use crate::meta_info::Info;
 use crate::peer::Peer;
 use crate::tracker::get_peers;
+
 use anyhow::{Context, Result};
 use log::{debug, info};
 use sha1::{Digest, Sha1};
@@ -580,7 +581,8 @@ async fn fetch_piece(
             // let payload = &*msg.payload.expect("Expected to have received some payload");
             // let payload: PiecePayload = payload.into();
 
-            let payload: PiecePayload = (&msg).into();
+            // TODO: Handle this properly!
+            let payload: PiecePayload = (&msg).try_into().unwrap();
 
             // let payload = &msg.payload.expect("Expected to have received some payload")[8..]; // todo rem
             hasher.update(payload.block);

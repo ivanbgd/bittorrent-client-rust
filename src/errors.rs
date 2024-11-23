@@ -52,11 +52,44 @@ impl From<TrackerError> for String {
     }
 }
 
+/// Errors related to working with [`MessageId`]
+#[derive(Debug, Error)]
+pub enum MessageIdError {
+    #[error("Unsupported message ID: {0}")]
+    UnsupportedId(u8),
+}
+
+/// Errors related to working with [`crate::message::Message`]
+#[derive(Debug, Error)]
+pub enum MessageError {
+    #[error(transparent)]
+    UnsupportedId(#[from] MessageIdError),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+/// Errors related to working with [`crate::message::PiecePayload`]
+#[derive(Debug, Error)]
+pub enum PiecePayloadError {
+    #[error("Wrong Piece message length: expected {0}, received {1} bytes")]
+    WrongLen(usize, usize),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 /// Errors related to working with [`crate::message::MessageCodec`]
 #[derive(Debug, Error)]
 pub enum MessageCodecError {
     #[error("Frame of length {0} is too large.")]
     LengthError(String),
+
+    #[error(transparent)]
+    UnsupportedId(#[from] MessageIdError),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 impl From<io::Error> for MessageCodecError {

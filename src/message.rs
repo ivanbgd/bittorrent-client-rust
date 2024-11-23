@@ -20,13 +20,12 @@
 
 use std::fmt::{Display, Formatter};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::{Buf, BufMut, BytesMut};
-use log::warn;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::constants::MAX_FRAME_SIZE;
-use crate::errors::MessageCodecError;
+use crate::errors::{MessageCodecError, MessageError, MessageIdError, PiecePayloadError};
 
 /// Message types
 ///
@@ -107,6 +106,9 @@ pub enum MessageId {
     /// The listen port is the port this peer's DHT node is listening on.
     /// This peer should be inserted in the local routing table (if DHT tracker is supported).
     Port = 9,
+
+    /// Unsupported message ID
+    Unsupported,
 }
 
 impl Display for MessageId {
@@ -121,20 +123,22 @@ impl From<MessageId> for u8 {
     }
 }
 
-impl From<u8> for MessageId {
-    fn from(value: u8) -> MessageId {
+impl TryFrom<u8> for MessageId {
+    type Error = MessageIdError;
+
+    fn try_from(value: u8) -> Result<MessageId, MessageIdError> {
         match value {
-            0 => MessageId::Choke,
-            1 => MessageId::Unchoke,
-            2 => MessageId::Interested,
-            3 => MessageId::NotInterested,
-            4 => MessageId::Have,
-            5 => MessageId::Bitfield,
-            6 => MessageId::Request,
-            7 => MessageId::Piece,
-            8 => MessageId::Cancel,
-            9 => MessageId::Port,
-            _ => panic!("{}", format!("Unsupported message ID: {}", value)),
+            0 => Ok(MessageId::Choke),
+            1 => Ok(MessageId::Unchoke),
+            2 => Ok(MessageId::Interested),
+            3 => Ok(MessageId::NotInterested),
+            4 => Ok(MessageId::Have),
+            5 => Ok(MessageId::Bitfield),
+            6 => Ok(MessageId::Request),
+            7 => Ok(MessageId::Piece),
+            8 => Ok(MessageId::Cancel),
+            9 => Ok(MessageId::Port),
+            v => Err(MessageIdError::UnsupportedId(v)),
         }
     }
 }
@@ -197,23 +201,25 @@ impl From<Message> for Vec<u8> {
 }
 
 /// Converts a byte stream into a [`Message`].
-impl From<Vec<u8>> for Message {
+impl TryFrom<Vec<u8>> for Message {
+    type Error = MessageError;
+
     /// Deserializes a [`Message`] received from a wire transfer.
-    fn from(value: Vec<u8>) -> Message {
-        let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).unwrap_or_else(|_| {
-            panic!(
+    fn try_from(value: Vec<u8>) -> Result<Message, MessageError> {
+        let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).with_context(|| {
+            format!(
                 "Failed to deserialize message length; received: {:?}",
                 value
             )
-        }));
-        let id = value[4].into(); // Same as: let id = MessageId::from(value[4]);
+        })?);
+        let id = value[4].try_into()?; // Same as: let id = MessageId::try_from(value[4]);
         let payload = if len == 1 {
             None
         } else {
             Some(value[5..4 + len as usize].to_vec())
         };
 
-        Self { len, id, payload }
+        Ok(Self { len, id, payload })
     }
 }
 
@@ -282,45 +288,47 @@ pub struct PiecePayload<'a> {
 }
 
 /// Converts a reference to a [`MessageId::Piece`] into a [`PiecePayload`].
-impl<'a> From<&'a Message> for PiecePayload<'a> {
+impl<'a> TryFrom<&'a Message> for PiecePayload<'a> {
+    type Error = PiecePayloadError;
+
     /// Converts a reference to a [`MessageId::Piece`] into a [`PiecePayload`].
     ///
     /// Checks the message and payload lengths.
     ///
     /// Uses `PiecePayload::from(value: &'a [u8])`.
-    fn from(value: &'a Message) -> PiecePayload {
+    fn try_from(value: &'a Message) -> Result<PiecePayload, PiecePayloadError> {
         let payload: &[u8] = value
             .payload
             .as_ref()
-            .expect("Expected to have received some payload") // TODO: Add proper error handling. Implement [`TryFrom`] instead.
-            .as_ref();
+            .context("Expected to have received some payload")?;
 
         let msg_len = value.len as usize;
-        if msg_len != 1 + payload.len() {
-            warn!("piece message length {msg_len} != 1 + {}", payload.len()); // TODO: Add proper error handling. Implement [`TryFrom`] instead.
+        if 1 + payload.len() != msg_len {
+            return Err(PiecePayloadError::WrongLen(1 + payload.len(), msg_len));
         }
 
-        payload.into()
+        payload.try_into()
     }
 }
 
-// TODO: Implement [`TryFrom`] instead.
 /// Converts a byte stream into a [`PiecePayload`].
-impl<'a> From<&'a [u8]> for PiecePayload<'a> {
+impl<'a> TryFrom<&'a [u8]> for PiecePayload<'a> {
+    type Error = PiecePayloadError;
+
     /// Deserializes a [`PiecePayload`] received from a wire transfer.
     ///
     /// This function is not aware of the requested length of the block of data,
     /// hence it can't check whether it has received the entire requested block.
-    fn from(value: &'a [u8]) -> PiecePayload {
-        let index = u32::from_be_bytes(value[0..4].try_into().expect("failed to convert index"));
-        let begin = u32::from_be_bytes(value[4..8].try_into().expect("failed to convert begin"));
+    fn try_from(value: &'a [u8]) -> Result<PiecePayload, PiecePayloadError> {
+        let index = u32::from_be_bytes(value[0..4].try_into().context("failed to convert index")?);
+        let begin = u32::from_be_bytes(value[4..8].try_into().context("failed to convert begin")?);
         let block = &value[8..];
 
-        Self {
+        Ok(Self {
             index,
             begin,
             block,
-        }
+        })
     }
 }
 
@@ -372,7 +380,7 @@ impl Decoder for MessageCodec {
             return Ok(None);
         }
 
-        let id = src[4].into();
+        let id = src[4].try_into()?;
 
         let payload = if length > 1 {
             Some(src[5..4 + length].to_vec())
