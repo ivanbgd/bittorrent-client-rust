@@ -41,6 +41,10 @@ use crate::pieces::Pieces;
 /// Torrent files are b-encoded and binary, not text files, so this function decodes them.
 ///
 /// Additionally, updates the info hash field which is not a part of the BitTorrent Specification.
+///
+/// # Errors
+/// This function returns an error in case it can't read the provided torrent file, or if it can't
+/// deserialize a bencode byte vector, or if it can't calculate hash of the `Info` dictionary.
 pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo, MetaInfoError> {
     log::debug!("META INFO CALLED!");
     let contents = fs::read(torrent)?;
@@ -80,6 +84,9 @@ impl MetaInfo {
     /// Calculates [`Sha1`] hash sum of the [`Info`] dictionary.
     ///
     /// The output [`Sha1`] hash sum is 20 bytes long.
+    ///
+    /// # Errors
+    /// Serialization errors.
     fn info_hash(&self) -> Result<[u8; SHA1_LEN]> {
         let b_encoded_serialized = serde_bencode::to_bytes(&self.info)?;
         let hash: [u8; SHA1_LEN] = *Sha1::digest(b_encoded_serialized).as_ref();
@@ -94,6 +101,9 @@ impl MetaInfo {
     /// because each byte is represented as two nibbles (two hex digits).
     ///
     /// As [`Sha1`] hash sum is 20 bytes long, the output info hash string is 40 characters long.
+    ///
+    /// # Errors
+    /// Serialization errors.
     fn info_hash_hex(&self) -> Result<String> {
         let hash = self.info_hash()?;
         let hash = hex::encode(hash);

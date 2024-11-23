@@ -111,6 +111,11 @@ struct WorkParams {
 /// Works with a single peer, but pipelines requests to it for increased download speed.
 ///
 /// `$ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
+///
+/// # Errors
+/// - [`std::io::Error`], in case it can't create the output file,
+/// - [`crate::errors::TrackerError`], in case it can't get peers,
+/// - [`PeerError`], various variants, in case of various errors.
 pub async fn download_piece(
     config: Config,
     output: &PathBuf,
@@ -189,6 +194,12 @@ pub async fn download_piece(
 /// - torrent: &[`PathBuf`], path to a torrent file
 ///
 /// `$ ./your_bittorrent.sh download -o /tmp/test.txt sample.torrent`
+///
+/// # Errors
+/// - [`std::io::Error`], in case it can't create the output file,
+/// - [`crate::errors::TrackerError`], in case it can't get peers,
+/// - [`PeerError`], various variants, in case of various errors.
+// TODO: Handle errors!
 pub async fn download(
     config: Config,
     output: &PathBuf,
@@ -278,9 +289,9 @@ pub async fn download(
 
     // file_writer.flush().await?; // todo rem
 
+    debug!("Took {:.3?} to complete.", start.elapsed());
     check_file_size(file_len, output).await?;
 
-    debug!("Took {:.3?} to complete.", start.elapsed());
     info!("Success!");
     eprintln!("Success! Took {:.3?} to complete.", start.elapsed()); // todo: comment-out
 
@@ -288,6 +299,9 @@ pub async fn download(
 }
 
 /// Calculates and returns basic work parameters
+///
+/// # Errors
+/// - [`crate::errors::TrackerError`], in case it can't get peers.
 fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<WorkParams, PeerError> {
     // Perform the tracker GET request to get a list of peers
     let (peers, info) = get_peers(torrent)?;
@@ -369,7 +383,7 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
 /// - `work_peers`: `Vec<Peer>`, list of peers to work with
 ///
 /// # Errors
-/// - [`PeerError`], in case it can't send the Interested message to a peer,
+/// - [`PeerError`] wrapping another error, in case it can't send a [`MessageId::Interested`] message to the peer,
 /// - [`PeerError::NoPeers`], in case it doesn't find a peer to work with.
 async fn local_get_peers(
     max_num_peers: usize,
@@ -501,15 +515,20 @@ struct BlockParams<'a> {
 /// Source (PDF): [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf)
 /// Also see: https://wiki.theory.org/BitTorrentSpecification#Queuing
 ///
-/// The piece is assembled in memory and written to storage as such after validating its hash.
+/// The piece is assembled in memory and written to storage as such after validating its hash. // TODO: modify?
 ///
 /// # Returns
-/// - [`Piece`], in case the peer has it, and we successfully received it and validated its hash value.
+/// - [`Piece`], in case the peer has it, and we successfully received it and validated its hash value. // TODO: remove?
 ///
 /// # Errors
-/// - [`PeerError::MissingPiece`], in case the peer doesn't have the piece;
-/// - [`PeerError::WrongMessageId`], in case we don't receive a [`Piece`] message;
-/// - [`PeerError::HashMismatch`], in case of bad hash value of the received piece.
+/// - [`PeerError::MissingPiece`], in case the peer doesn't have the piece,
+/// - [`PeerError::TryFromIntError`], in case block offset cannot be calculated,
+/// - [`PeerError`] wrapping another error, in case it can't send a [`MessageId::Request`] message to the peer,
+/// - [`PeerError`] wrapping another error, in case it can't receive a [`MessageId::Piece`] message from the peer,
+/// - [`PeerError::WrongMessageId`], in case we don't receive a [`MessageId::Piece`] message,
+/// - [`crate::errors::PiecePayloadError`], in case conversion from `&`[`Message`] to [`PiecePayload`] fails,
+/// - [`PeerError::HashMismatch`], in case of bad hash value of the received piece,
+/// - [`std::io::Error`], in case it can't write to file. // TODO: rem?
 async fn fetch_piece(
     config: &Config,
     block_params: &mut BlockParams<'_>,
@@ -532,6 +551,10 @@ async fn fetch_piece(
         ..
     } = block_params;
 
+    if !peer_has_piece(peer, *piece_index) {
+        return Err(PeerError::MissingPiece(peer.addr, *piece_index));
+    }
+
     // The entire Piece data
     let mut data = Vec::with_capacity(*num_blocks_per_piece); // todo rem
                                                               // let mut data = [0u8; MAX_PIECE_SIZE];
@@ -548,10 +571,6 @@ async fn fetch_piece(
     // TODO: Use block indices and assemble them in order.
     // What we currently have works, because we work with only one peer, but messages can in general
     // be received out of order over the network, in either way, even with one peer, I guess.
-
-    if !peer_has_piece(peer, *piece_index) {
-        return Err(PeerError::MissingPiece(peer.addr, *piece_index));
-    }
 
     // let num_reqs = config.max_pipelined_requests; // todo rem
     let num_reqs = min(config.max_pipelined_requests, *num_blocks_per_piece);
@@ -596,18 +615,18 @@ async fn fetch_piece(
         peer.flush().await.context("Flush a Request message")?;
         i -= j;
 
-        // Receive a Piece message for each block we've requested in a row.
+        // Receive a Piece message for each block we've requested in a row. // todo: in a row or out of order, in general case?
         for _ in 0..num_reqs {
-            let msg = peer.recv_msg().await.context("Receive a Piece message")?;
+            let msg = peer.recv_msg().await.context("Receive a Piece message")?; // TODO: Handle this in `download()`!
             if msg.id != MessageId::Piece {
-                return Err(PeerError::from((msg.id, MessageId::Piece)));
+                return Err(PeerError::from((msg.id, MessageId::Piece))); // TODO: Handle this in `download()`!
             }
 
             // let payload = &*msg.payload.expect("Expected to have received some payload");
             // let payload: PiecePayload = payload.into();
 
-            // TODO: Handle this properly!
-            let payload: PiecePayload = (&msg).try_into().unwrap();
+            // TODO: Handle this in `download()`!
+            let payload: PiecePayload = (&msg).try_into()?;
 
             // let payload = &msg.payload.expect("Expected to have received some payload")[8..]; // todo rem
             hasher.update(payload.block);
@@ -621,8 +640,8 @@ async fn fetch_piece(
         }
     }
 
-    file_writer.write_all(&data).await?;
-    file_writer.flush().await?;
+    file_writer.write_all(&data).await?; // todo rem?
+    file_writer.flush().await?; // todo rem?
 
     ///////////////////////////////////////////////////////////////////////////////
 
@@ -682,6 +701,7 @@ async fn fetch_piece(
     let piece = hex::encode(piece_hash);
     let hash = hex::encode(hasher.finalize());
     if piece != hash {
+        // TODO: Handle this in `download()`!
         return Err(PeerError::HashMismatch(piece, hash));
     }
 
@@ -691,7 +711,7 @@ async fn fetch_piece(
     //     data,
     // })
 
-    // Ok(Piece { // todo: rem
+    // Ok(Piece { // todo: uncomment?
     //     piece: *piece_index,
     //     data,
     // })
@@ -699,7 +719,15 @@ async fn fetch_piece(
     Ok(())
 }
 
+struct Piece<'a> {
+    piece: usize,
+    data: &'a [u8],
+}
+
 /// Compares the expected file size with the written file size.
+///
+/// # Errors
+/// - [`PeerError::WrongLen`], in case the sizes don't match.
 async fn check_file_size(expected_len: usize, output: &PathBuf) -> Result<(), PeerError> {
     let file = File::open(output).await?;
     let file_size = file.metadata().await?.len() as usize;
@@ -711,17 +739,6 @@ async fn check_file_size(expected_len: usize, output: &PathBuf) -> Result<(), Pe
         return Err(PeerError::WrongLen(expected_len, file_size));
     }
     Ok(())
-}
-
-struct Piece {
-    piece: usize,
-    data: Vec<u8>, // todo: Option<>?
-}
-
-struct Block {
-    piece: usize,
-    block: usize,
-    data: Vec<u8>,
 }
 
 /// Checks if the peer has the required piece.
@@ -787,6 +804,19 @@ fn check_all_peers_for_piece(work_peers: &[Peer], piece_index: usize) -> Result<
     Ok(peer_idx)
     // Ok((peer_idx, peer)) // todo rem
 }
+
+// todo rem
+// struct Piece {
+//     piece: usize,
+//     data: Vec<u8>, // todo: Option<>?
+// }
+
+// todo rem
+// struct Block {
+//     piece: usize,
+//     block: usize,
+//     data: Vec<u8>,
+// }
 
 // // TODO: rem
 // pub struct Piece {

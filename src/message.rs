@@ -293,9 +293,9 @@ impl<'a> TryFrom<&'a Message> for PiecePayload<'a> {
 
     /// Converts a reference to a [`MessageId::Piece`] into a [`PiecePayload`].
     ///
-    /// Checks the message and payload lengths.
+    /// Validates the payload length against the message length.
     ///
-    /// Uses `PiecePayload::from(value: &'a [u8])`.
+    /// Uses `PiecePayload::try_from(value: &'a [u8])`.
     fn try_from(value: &'a Message) -> Result<PiecePayload, PiecePayloadError> {
         let payload: &[u8] = value
             .payload

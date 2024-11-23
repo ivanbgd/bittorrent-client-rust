@@ -139,6 +139,9 @@ pub enum PeerError {
     #[error(transparent)]
     FrameLengthError(MessageCodecError),
 
+    #[error(transparent)]
+    PiecePayloadError(#[from] PiecePayloadError),
+
     #[error("Hash mismatch: expected {0}, calculated {1}")]
     HashMismatch(String, String),
 

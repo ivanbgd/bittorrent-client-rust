@@ -40,6 +40,13 @@ use crate::tracker::peers::Peers;
 /// because it can then be reused in higher-level functions that call this function,
 /// such as [`crate::peer_comm::download_piece`], for example.
 /// It contains info hash that is 20 bytes long plain SHA1 hash sum of the [`Info`] dictionary from the torrent file.
+///
+/// # Errors
+/// - [`crate::errors::MetaInfoError`]
+/// - [`reqwest::Error`]
+/// - [`serde_bencode::Error`]
+///
+/// All error types are wrapped in [`TrackerError`].
 pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
     let meta = meta_info(torrent)?;
     let tracker = meta.announce;
