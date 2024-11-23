@@ -62,7 +62,13 @@ pub enum MessageIdError {
 /// Errors related to working with [`crate::message::Message`]
 #[derive(Debug, Error)]
 pub enum MessageError {
-    #[error(transparent)]
+    #[error("{0}")]
+    TryFromIntError(#[from] TryFromIntError),
+
+    #[error("{0}")]
+    TryFromSliceError(#[from] TryFromSliceError),
+
+    #[error("{0}")]
     UnsupportedId(#[from] MessageIdError),
 
     #[error(transparent)]
@@ -109,6 +115,9 @@ pub enum PeerError {
 
     #[error("Wrong message ID: {0}; expected {1}")]
     WrongMessageId(MessageId, MessageId),
+
+    #[error("No useful peers could be found.")]
+    NoPeers,
 
     /// The peer doesn't have the piece.
     #[error("The peer {0} doesn't have the piece index {1}")]

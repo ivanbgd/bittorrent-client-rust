@@ -46,7 +46,7 @@ use crate::peer::Peer;
 use crate::tracker::get_peers;
 
 use anyhow::{Context, Result};
-use log::{debug, info};
+use log::{debug, info, warn};
 use sha1::{Digest, Sha1};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -360,10 +360,17 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
 ///
 /// Tries to handshake with them, and if it succeeds, adds the peers to the list that it returns.
 ///
+/// Skips peers that it isn't able to handshake with, or from which it doesn't receive a Bitfield or
+/// an Unchoke message. A peer which doesn't send the Bitfield message doesn't have any piece anyway.
+///
 /// Supports working with multiple peers at the same time.
 ///
 /// # Returns
-/// - List of peers to work with, `work_peers: Vec<Peer>`,
+/// - `work_peers`: `Vec<Peer>`, list of peers to work with
+///
+/// # Errors
+/// - [`PeerError`], in case it can't send the Interested message to a peer,
+/// - [`PeerError::NoPeers`], in case it doesn't find a peer to work with.
 async fn local_get_peers(
     max_num_peers: usize,
     work_params: WorkParams,
@@ -379,38 +386,44 @@ async fn local_get_peers(
         ..
     } = work_params;
 
-    // let mut num_peers = min(config.max_num_peers, num_pcs); // todo rem
-    // if is_last_piece.is_some() && is_last_piece.unwrap() {
-    //     num_peers = num_blocks_in_last_piece;
-    // } // todo rem
-    let num_peers = min(peers.len(), max_num_peers);
-    debug!(
-        "max_num_peers = {max_num_peers}; num_peers = {num_peers}; peers.len() = {}",
-        peers.len()
-    );
+    let peers_len = peers.len();
+    let num_peers = min(max_num_peers, peers_len);
+    debug!("max_num_peers = {max_num_peers}, peers_len = {peers_len}; num_peers = {num_peers}");
 
     let mut work_peers: Vec<Peer> = Vec::with_capacity(num_peers);
 
-    // TODO: Handle errors here and don't return, but rather continue with the next peer.
     // Get all peers to work with - handshake with them and store them.
-    // The selection of peers could be randomized, but it isn't required; rather, this is just an idea.
-    // Note: Don't store peer_idx inside Peer, at least not as-is, because we could skip adding a peer in this loop.
-    for (peer_idx, peer) in peers.iter_mut().enumerate().take(num_peers) {
+    // Exchange messages with each peer: receive Bitfield, send Interested, receive Unchoke.
+    //
+    // Implementation notes:
+    // - The selection of peers could be randomized, but it isn't required; rather, this is just an idea.
+    // - Don't store peer_idx inside Peer, at least not as-is, because we could skip adding a peer in this loop.
+    for (peer_idx, peer) in peers.iter_mut().enumerate().take(peers_len) {
         // Establish a TCP connection with a peer, and perform a handshake
-        let mut peer = handshake(peer, &info.info_hash).await?;
-
+        let mut peer = match handshake(peer, &info.info_hash).await {
+            Ok(peer) => peer,
+            Err(err) => {
+                warn!("Handshake error: {err:#}");
+                continue;
+            }
+        };
         debug!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
-        // Exchange messages with the peer: receive Bitfield, send Interested, receive Unchoke
-
-        // Receive a Bitfield message (TODO: The message is optional in general case, so we can improve this.)
-        let msg = peer
-            .recv_msg()
-            .await
-            .context("Receive a Bitfield message")?;
+        // Receive a Bitfield message
+        // This message is optional, and need not be sent if a peer has no pieces.
+        // If the peer doesn't have any pieces, we can skip it.
+        let msg = match peer.recv_msg().await {
+            Ok(msg) => msg,
+            Err(err) => {
+                warn!("Receive a Bitfield message: {err:#}");
+                continue;
+            }
+        };
         debug!("01 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Bitfield {
-            return Err(PeerError::from((msg.id, MessageId::Bitfield)));
+            let err = PeerError::from((msg.id, MessageId::Bitfield));
+            warn!("Receive a Bitfield message: {err:#}");
+            continue;
         }
         peer.bitfield = Some(
             msg.payload
@@ -426,19 +439,31 @@ async fn local_get_peers(
         peer.flush().await.context("Flush the Interested message")?;
 
         // Receive an Unchoke message
-        let msg = peer
-            .recv_msg()
-            .await
-            .context("Receive an Unchoke message")?;
+        let msg = match peer.recv_msg().await {
+            Ok(msg) => msg,
+            Err(err) => {
+                warn!("Receive an Unchoke message: {err:#}");
+                continue;
+            }
+        };
         debug!("02 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Unchoke {
-            return Err(PeerError::from((msg.id, MessageId::Unchoke)));
+            let err = PeerError::from((msg.id, MessageId::Unchoke));
+            warn!("Receive an Unchoke message: {err:#}");
+            continue;
         }
 
         work_peers.push(peer);
+
+        if work_peers.len() == num_peers {
+            break;
+        }
     }
 
     debug!("work_peers.len() = {}", work_peers.len());
+    if work_peers.is_empty() {
+        return Err(PeerError::NoPeers);
+    }
 
     Ok(work_peers)
 }

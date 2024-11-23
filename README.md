@@ -73,7 +73,7 @@ The assignment itself only supports the compact mode.
 
 - Optional application configuration, through the optional [config.json](config.json) file.
 - Logging.
-- Timing of the whole file download.
+- Timing of the whole-file download.
 - We check the Bitfield message payload to see whether a peer has the piece that we need.
     - The challenge doesn't require this as all their peers have all the required pieces during testing.
 - We pipeline requests to a single peer for increased download speed. This was suggested as optional
@@ -81,9 +81,6 @@ The assignment itself only supports the compact mode.
 
 # Possible Improvements
 
-- The Bitfiled message is optional, and a peer doesn't need to send it in case it doesn't have any piece,
-  so we should first check if the peer has sent it to us or not. Right now we assume it has, because
-  the challenge peers do that during testing.
 - Discover new peers at regular time intervals, but this is not required in the challenge.
 - The [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf) (PDF) has more ideas,
   but none of them are required in this challenge.
