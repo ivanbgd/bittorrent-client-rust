@@ -47,6 +47,8 @@ use crate::tracker::get_peers;
 
 use anyhow::{Context, Result};
 use log::{debug, info, trace, warn};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use sha1::{Digest, Sha1};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -128,7 +130,7 @@ pub async fn download_piece(
 
     // Support working with multiple peers at the same time
     let mut work_peers = local_get_peers(&mut peers, &info, config.max_num_peers).await?;
-    let peer_idx = check_all_peers_for_piece(&work_peers, piece_index)?;
+    let peer_idx = find_peer_for_piece(&work_peers, piece_index)?;
     let peer = &mut work_peers[peer_idx];
 
     let piece_hash = &info.pieces.0[piece_index];
@@ -246,7 +248,7 @@ pub async fn download(
 
         ///////
         // TODO: Change! Devise a proper way of assigning pieces to peers!
-        let peer_idx = check_all_peers_for_piece(&work_peers, piece_index)?; // todo: don't do this
+        let peer_idx = find_peer_for_piece(&work_peers, piece_index)?; // todo: don't do this
         let peer = &mut work_peers[peer_idx];
         ///////
 
@@ -586,10 +588,10 @@ async fn fetch_piece(
                 Some(RequestPayload::new(index, begin, length).into()),
             );
             debug!(
-                "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
+                "block {block:3}/{total_num_blocks}, i = {i:3}: blk_i = {block_idx}, \
                  peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
             );
-            eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
+            // eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
             peer.feed(msg).await.context("Feed a Request message")?;
 
             if i == current_num_blocks_per_piece - 1 {
@@ -601,7 +603,7 @@ async fn fetch_piece(
         peer.flush().await.context("Flush a Request message")?;
         i -= j;
 
-        // Receive a Piece message for each block we've requested in a row. // todo: in a row or out of order, in general case?
+        // Receive a Piece message for each block we've requested. Pieces could arrive out of order in general case.
         for _ in 0..num_reqs {
             let msg = peer.recv_msg().await.context("Receive a Piece message")?; // TODO: Handle this in `download()`!
             if msg.id != MessageId::Piece {
@@ -612,8 +614,19 @@ async fn fetch_piece(
             let payload: PiecePayload = (&msg).try_into()?;
 
             hasher.update(payload.block);
-            let begin = payload.begin as usize; // begin == i * *block_len
-            data[begin..begin + payload.block.len()].copy_from_slice(payload.block); // payload.block.len() == msg.len - 9
+
+            let index = payload.index;
+            // `begin` could be != `i * *block_len` in general case, because pieces could arrive out of order.
+            let begin = payload.begin as usize;
+            // `payload.block.len()` == `msg.len - 9`, and this is checked in `PiecePayload::try_from(&Message)`,
+            // which is used above to get `payload`.
+            let length = payload.block.len();
+            data[begin..begin + length].copy_from_slice(payload.block);
+            let pc = i + 1;
+            trace!(
+                "Received {pc:3}/{current_num_blocks_per_piece}: peer_idx = {peer_idx}; \
+                piece index = {index}, begin = {begin}, length = {length}"
+            );
 
             if i == current_num_blocks_per_piece - 1 {
                 break 'outer;
@@ -690,32 +703,29 @@ fn peer_has_piece(peer: &Peer, piece_index: usize) -> bool {
 
 /// Checks all peers for the given piece and tries to find one that has it.
 ///
-/// Returns the first peer for which it determines that it has the piece.
-/// This could be randomized.
+/// Returns a random peer for which it determines that it has the piece.
 ///
 /// # Returns
-/// - `peer_idx`: `usize`, index of the peer in the list of peers, `work_peers`
+/// - `peer_idx`: `usize`, index of a random peer in the list of peers, `work_peers`, that has the piece
 ///
 /// # Errors
 /// - [`PeerError::NoPeerHasPiece`], in case no peer has the piece.
-fn check_all_peers_for_piece(work_peers: &[Peer], piece_index: usize) -> Result<usize, PeerError> {
-    let mut pi = 0;
+fn find_peer_for_piece(work_peers: &[Peer], piece_index: usize) -> Result<usize, PeerError> {
+    let mut list = vec![];
 
-    let (peer_idx, found) = loop {
-        let p = &work_peers[pi];
-        if peer_has_piece(p, piece_index) {
-            break (pi, true);
+    for (peer_idx, peer) in work_peers.iter().enumerate() {
+        if peer_has_piece(peer, piece_index) {
+            list.push(peer_idx);
+        } else {
+            trace!("{}", PeerError::MissingPiece(peer.addr, piece_index));
         }
-        info!("{}", PeerError::MissingPiece(p.addr, piece_index));
-        if pi == work_peers.len() - 1 {
-            break (0, false);
-        }
-        pi += 1;
-    };
+    }
 
-    if !found {
+    if list.is_empty() {
         return Err(PeerError::NoPeerHasPiece(piece_index));
     }
 
-    Ok(peer_idx)
+    list.shuffle(&mut thread_rng());
+
+    Ok(list[0])
 }
