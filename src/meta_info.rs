@@ -46,7 +46,7 @@ use crate::pieces::Pieces;
 /// This function returns an error in case it can't read the provided torrent file, or if it can't
 /// deserialize a bencode byte vector, or if it can't calculate hash of the `Info` dictionary.
 pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo, MetaInfoError> {
-    log::debug!("META INFO CALLED!");
+    log::debug!("META INFO CALLED!"); // TODO
     let contents = fs::read(torrent)?;
 
     let mut metainfo: MetaInfo = serde_bencode::from_bytes(&contents)?;

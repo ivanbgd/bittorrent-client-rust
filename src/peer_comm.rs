@@ -46,7 +46,7 @@ use crate::peer::Peer;
 use crate::tracker::get_peers;
 
 use anyhow::{Context, Result};
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use sha1::{Digest, Sha1};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -78,21 +78,6 @@ pub async fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Resul
     Ok(peer)
 }
 
-#[derive(Debug, Clone)]
-struct WorkParams {
-    peers: Vec<SocketAddrV4>,
-    info: Info,
-    file_len: usize,
-    num_pcs: usize,
-    is_last_piece: Option<bool>,
-    current_piece_len: usize,
-    block_len: usize,
-    num_blocks_per_piece: usize,
-    num_blocks_in_last_piece: usize,
-    last_block_len: usize,
-    total_num_blocks: usize,
-}
-
 /// Downloads a single piece of a file and stores it.
 ///
 /// Arguments:
@@ -122,18 +107,17 @@ pub async fn download_piece(
     torrent: &PathBuf,
     piece_index: usize,
 ) -> Result<(), PeerError> {
-    let file = File::create(output).await?;
-    let mut file_writer = BufWriter::new(file);
-
     let work_params = get_work_params(torrent, Some(piece_index))?;
 
     let WorkParams {
+        mut peers,
         info,
         num_pcs,
-        is_last_piece,
-        current_piece_len,
+        piece_len,
+        last_piece_len,
         block_len,
         num_blocks_per_piece,
+        num_blocks_in_last_piece,
         last_block_len,
         ..
     } = work_params.clone();
@@ -143,32 +127,42 @@ pub async fn download_piece(
     }
 
     // Support working with multiple peers at the same time
-    // let (mut work_peers, block_iters) = local_get_peers(work_params).await?; // todo rem
-    let mut work_peers = local_get_peers(config.max_num_peers, work_params).await?;
+    let mut work_peers = local_get_peers(&mut peers, &info, config.max_num_peers).await?;
     let peer_idx = check_all_peers_for_piece(&work_peers, piece_index)?;
     let peer = &mut work_peers[peer_idx];
-    // let num_peers = work_peers.len(); // todo rem
 
     let piece_hash = &info.pieces.0[piece_index];
 
-    // Block index - for logging purposes only
-    let mut block = 0usize;
+    let is_last_piece = piece_index == num_pcs - 1;
+    let mut current_piece_len = piece_len;
+    let mut total_num_blocks = num_blocks_per_piece;
+    if is_last_piece {
+        current_piece_len = last_piece_len;
+        total_num_blocks = num_blocks_in_last_piece;
+    }
 
-    let mut block_params = BlockParams {
-        // block_iters, // todo rem
-        // num_peers, // todo rem
-        is_last_piece: is_last_piece.unwrap(),
+    let block_params = PieceParams {
+        num_pcs,
+        piece_len,
+        last_piece_len,
         block_len,
         num_blocks_per_piece,
+        num_blocks_in_last_piece,
         last_block_len,
-        total_num_blocks: num_blocks_per_piece,
+        total_num_blocks,
         piece_index,
         piece_hash,
     };
 
+    // Block index - for logging purposes only
+    let mut block = 0usize;
+
+    let file = File::create(output).await?;
+    let mut file_writer = BufWriter::with_capacity(current_piece_len, file);
+
     fetch_piece(
         &config,
-        &mut block_params,
+        &block_params,
         peer_idx,
         peer,
         &mut block,
@@ -205,56 +199,45 @@ pub async fn download(
     output: &PathBuf,
     torrent: &PathBuf,
 ) -> Result<(), PeerError> {
-    let file = File::create(output).await?;
-    let mut file_writer = BufWriter::new(file);
-
     let work_params = get_work_params(torrent, None)?;
 
     let WorkParams {
-        // peers, // todo rem
+        mut peers,
         info,
         file_len,
         num_pcs,
+        piece_len,
+        last_piece_len,
         block_len,
-        mut num_blocks_per_piece,
+        num_blocks_per_piece,
         num_blocks_in_last_piece,
         last_block_len,
         total_num_blocks,
-        ..
     } = work_params.clone();
 
     // Support working with multiple peers at the same time
-    // let (mut work_peers, mut block_iters) = local_get_peers(work_params).await?; // todo rem
-    let mut work_peers = local_get_peers(config.max_num_peers, work_params).await?;
-    // let mut num_peers = work_peers.len(); // todo rem
+    let mut work_peers = local_get_peers(&mut peers, &info, config.max_num_peers).await?;
 
     // All piece hashes from the torrent file
     let pieces = &info.pieces.0;
 
-    // // Entire contents of the file
-    // let mut contents = vec![];todo
-
     let start = Instant::now();
+
+    let file = File::create(output).await?;
+    let mut file_writer = BufWriter::with_capacity(file_len, file); // TODO: This could be too large to fit in memory!
 
     // Block index - for logging purposes only
     let mut block = 0usize;
 
     // Download all pieces
     for (piece_index, piece_hash) in pieces.iter().enumerate() {
-        let is_last_piece = piece_index == num_pcs - 1;
-        if is_last_piece {
-            num_blocks_per_piece = num_blocks_in_last_piece;
-            // block_iters = num_blocks_per_piece; // todo rem
-            // num_peers = num_blocks_in_last_piece; // todo rem
-            // num_peers = min(peers.len(), num_peers); // todo rem
-        }
-
-        let mut block_params = BlockParams {
-            // block_iters, // todo rem
-            // num_peers, // todo rem
-            is_last_piece,
+        let block_params = PieceParams {
+            num_pcs,
+            piece_len,
+            last_piece_len,
             block_len,
             num_blocks_per_piece,
+            num_blocks_in_last_piece,
             last_block_len,
             total_num_blocks,
             piece_index,
@@ -267,10 +250,10 @@ pub async fn download(
         let peer = &mut work_peers[peer_idx];
         ///////
 
-        // let piece = fetch_piece(&block_params, &mut work_peers, &mut block).await?; // todo rem
+        // TODO: Handle errors properly! Repeat the piece somehow in case of an error!
         fetch_piece(
             &config,
-            &mut block_params,
+            &block_params,
             peer_idx,
             peer,
             &mut block,
@@ -289,7 +272,7 @@ pub async fn download(
 
     // file_writer.flush().await?; // todo rem
 
-    debug!("Took {:.3?} to complete.", start.elapsed());
+    info!("Took {:.3?} to complete.", start.elapsed());
     check_file_size(file_len, output).await?;
 
     info!("Success!");
@@ -298,10 +281,25 @@ pub async fn download(
     Ok(())
 }
 
-/// Calculates and returns basic work parameters
+#[derive(Debug, Clone)]
+struct WorkParams {
+    peers: Vec<SocketAddrV4>,
+    info: Info,
+    file_len: usize,
+    num_pcs: usize,
+    piece_len: usize,
+    last_piece_len: usize,
+    block_len: usize,
+    num_blocks_per_piece: usize,
+    num_blocks_in_last_piece: usize,
+    last_block_len: usize, // todo: rem ?
+    total_num_blocks: usize,
+}
+
+/// Calculates and returns basic work parameters.
 ///
 /// # Errors
-/// - [`crate::errors::TrackerError`], in case it can't get peers.
+/// - [`crate::errors::TrackerError`], in case it can't get the list of peers.
 fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<WorkParams, PeerError> {
     // Perform the tracker GET request to get a list of peers
     let (peers, info) = get_peers(torrent)?;
@@ -319,14 +317,10 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
     if last_piece_len == 0 {
         last_piece_len = piece_len;
     }
-    let mut current_piece_len = piece_len;
-
-    let is_last_piece = piece_index.map(|piece_index| piece_index == num_pcs - 1);
 
     debug!("piece_index = {:?}", piece_index);
     debug!("file_len = {}", file_len);
     debug!("num_pcs = {}", num_pcs);
-    debug!("is_last_piece = {:?}", is_last_piece);
     debug!("piece_len = {}", piece_len);
     debug!("last_piece_len = {}", last_piece_len);
 
@@ -334,20 +328,13 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
     // Pieces ultimately need to be assembled from received blocks.
     // Block size is 16 kB (`BLOCK_SIZE`), except potentially for the last block which can be smaller.
     let block_len = BLOCK_SIZE;
-    let mut num_blocks_per_piece = piece_len / block_len;
+    let num_blocks_per_piece = piece_len / block_len;
     let mut last_block_len = last_piece_len % block_len;
     let num_blocks_in_last_piece = last_piece_len / block_len + last_block_len.clamp(0, 1);
     if last_block_len == 0 {
         last_block_len = block_len;
     }
     let total_num_blocks = (num_pcs - 1) * num_blocks_per_piece + num_blocks_in_last_piece;
-
-    if is_last_piece.is_some() && is_last_piece.unwrap() {
-        num_blocks_per_piece = num_blocks_in_last_piece;
-        current_piece_len = last_piece_len;
-    }
-
-    debug!("current_piece_len = {}", current_piece_len);
 
     debug!("block_len = {}", block_len);
     debug!("num_blocks_per_piece = {}", num_blocks_per_piece);
@@ -360,8 +347,8 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
         info,
         file_len,
         num_pcs,
-        is_last_piece,
-        current_piece_len,
+        piece_len,
+        last_piece_len,
         block_len,
         num_blocks_per_piece,
         num_blocks_in_last_piece,
@@ -386,20 +373,10 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
 /// - [`PeerError`] wrapping another error, in case it can't send a [`MessageId::Interested`] message to the peer,
 /// - [`PeerError::NoPeers`], in case it doesn't find a peer to work with.
 async fn local_get_peers(
+    peers: &mut [SocketAddrV4],
+    info: &Info,
     max_num_peers: usize,
-    work_params: WorkParams,
 ) -> Result<Vec<Peer>, PeerError> {
-    // TODO: rework to just pass in the args directly
-    let WorkParams {
-        mut peers,
-        info,
-        // num_pcs, // todo rem
-        // is_last_piece, // todo rem
-        // num_blocks_per_piece,// todo rem
-        // num_blocks_in_last_piece, // todo rem
-        ..
-    } = work_params;
-
     let peers_len = peers.len();
     let num_peers = min(max_num_peers, peers_len);
     debug!("max_num_peers = {max_num_peers}, peers_len = {peers_len}; num_peers = {num_peers}");
@@ -421,7 +398,7 @@ async fn local_get_peers(
                 continue;
             }
         };
-        debug!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
+        trace!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
         // Receive a Bitfield message
         // This message is optional, and need not be sent if a peer has no pieces.
@@ -433,7 +410,7 @@ async fn local_get_peers(
                 continue;
             }
         };
-        debug!("01 peer_idx {peer_idx}: {msg}");
+        trace!("01 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Bitfield {
             let err = PeerError::from((msg.id, MessageId::Bitfield));
             warn!("Receive a Bitfield message: {err:#}");
@@ -460,7 +437,7 @@ async fn local_get_peers(
                 continue;
             }
         };
-        debug!("02 peer_idx {peer_idx}: {msg}");
+        trace!("02 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Unchoke {
             let err = PeerError::from((msg.id, MessageId::Unchoke));
             warn!("Receive an Unchoke message: {err:#}");
@@ -478,29 +455,24 @@ async fn local_get_peers(
     if work_peers.is_empty() {
         return Err(PeerError::NoPeers);
     }
+    debug!("");
 
     Ok(work_peers)
 }
 
 #[derive(Debug)]
-struct BlockParams<'a> {
-    // work_peers: &'a Vec<Peer>, // todo rem
-    // block_iters: usize, // todo rem
-    // num_peers: usize, // todo rem
-    is_last_piece: bool,
+struct PieceParams<'a> {
+    num_pcs: usize,
+    piece_len: usize,
+    last_piece_len: usize,
     block_len: usize,
     num_blocks_per_piece: usize,
+    num_blocks_in_last_piece: usize,
     last_block_len: usize,
     total_num_blocks: usize,
-    // block: &'a mut usize, // todo rem
     piece_index: usize,
     piece_hash: &'a [u8; SHA1_LEN],
-    // file_writer: &'a BufWriter<File>, // todo rem
 }
-
-// TODO: Work on a block basis
-// ///Gets a single block (sub-piece) from a peer and returns it.
-// async fn get_block(...) -> Result<Block, PeerError> {...}
 
 /// Fetches a single piece from a single peer and returns it.
 ///
@@ -531,33 +503,48 @@ struct BlockParams<'a> {
 /// - [`std::io::Error`], in case it can't write to file. // TODO: rem?
 async fn fetch_piece(
     config: &Config,
-    block_params: &mut BlockParams<'_>,
+    piece_params: &PieceParams<'_>,
     peer_idx: usize,
     peer: &mut Peer,
     block: &mut usize,
     file_writer: &mut BufWriter<File>,
 ) -> Result<(), PeerError> {
     // ) -> Result<Piece, PeerError> {// todo: rem
-    let BlockParams {
-        // block_iters,
-        // num_peers, // todo rem
-        is_last_piece,
+    let PieceParams {
+        num_pcs,
+        piece_len,
+        last_piece_len,
         block_len,
         num_blocks_per_piece,
+        num_blocks_in_last_piece,
         last_block_len,
         total_num_blocks,
         piece_index,
         piece_hash,
-        ..
-    } = block_params;
+    } = piece_params;
 
     if !peer_has_piece(peer, *piece_index) {
         return Err(PeerError::MissingPiece(peer.addr, *piece_index));
     }
 
+    let is_last_piece = *piece_index == *num_pcs - 1;
+    let mut current_piece_len = *piece_len;
+    let mut current_num_blocks_per_piece = *num_blocks_per_piece;
+    if is_last_piece {
+        current_piece_len = *last_piece_len;
+        current_num_blocks_per_piece = *num_blocks_in_last_piece;
+    }
+    trace!(
+        "is_last_piece = {is_last_piece}, current_piece_len = {current_piece_len}, \
+        current_num_blocks_per_piece = {current_num_blocks_per_piece}"
+    );
+
+    let piece_offset = *piece_index * *piece_len;
+    trace!("piece_index {piece_index} * piece_len {piece_len} = piece_offset {piece_offset}");
+
     // The entire Piece data
-    let mut data = Vec::with_capacity(*num_blocks_per_piece); // todo rem
-                                                              // let mut data = [0u8; MAX_PIECE_SIZE];
+    // let mut data = Vec::with_capacity(*num_blocks_per_piece); // todo rem
+    let mut data = [0u8; MAX_PIECE_SIZE];
 
     // For validating the hash of the received piece
     let mut hasher = Sha1::new();
@@ -570,15 +557,14 @@ async fn fetch_piece(
     ///////////////////////////////////////////////////////////////////////////////
     // TODO: Use block indices and assemble them in order.
     // What we currently have works, because we work with only one peer, but messages can in general
-    // be received out of order over the network, in either way, even with one peer, I guess.
+    // be received out of order over the network, in either way, even with one peer, I suppose.
 
-    // let num_reqs = config.max_pipelined_requests; // todo rem
-    let num_reqs = min(config.max_pipelined_requests, *num_blocks_per_piece);
-    let block_iters =
-        *num_blocks_per_piece / num_reqs + (*num_blocks_per_piece % num_reqs).clamp(0, 1);
-    debug!("num_reqs = {num_reqs}, block_iters = {block_iters}");
+    let num_reqs = min(config.max_pipelined_requests, current_num_blocks_per_piece);
+    let block_iters = current_num_blocks_per_piece / num_reqs
+        + (current_num_blocks_per_piece % num_reqs).clamp(0, 1);
+    trace!("num_reqs = {num_reqs}, block_iters = {block_iters}");
 
-    // Pipeline requests to a single peer.
+    // Pipeline requests to the single peer.
     // Outer loop is by batches of blocks, while the inner loop is by requests to the single peer.
     'outer: for block_idx in 0..block_iters {
         let mut j = 0usize;
@@ -592,7 +578,7 @@ async fn fetch_piece(
             let index = *piece_index as u32;
             let begin = u32::try_from(i * *block_len)?;
             let mut length = *block_len as u32;
-            if *is_last_piece && i == *num_blocks_per_piece - 1 {
+            if is_last_piece && i == current_num_blocks_per_piece - 1 {
                 length = *last_block_len as u32;
             }
             let msg = Message::new(
@@ -606,7 +592,7 @@ async fn fetch_piece(
             eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
             peer.feed(msg).await.context("Feed a Request message")?;
 
-            if i == *num_blocks_per_piece - 1 {
+            if i == current_num_blocks_per_piece - 1 {
                 break;
             }
             i += 1;
@@ -622,81 +608,22 @@ async fn fetch_piece(
                 return Err(PeerError::from((msg.id, MessageId::Piece))); // TODO: Handle this in `download()`!
             }
 
-            // let payload = &*msg.payload.expect("Expected to have received some payload");
-            // let payload: PiecePayload = payload.into();
-
             // TODO: Handle this in `download()`!
             let payload: PiecePayload = (&msg).try_into()?;
 
-            // let payload = &msg.payload.expect("Expected to have received some payload")[8..]; // todo rem
             hasher.update(payload.block);
-            data.extend(payload.block); // todo rem
-                                        // data[..].copy_from_slice(payload.block);
+            let begin = payload.begin as usize; // begin == i * *block_len
+            data[begin..begin + payload.block.len()].copy_from_slice(payload.block); // payload.block.len() == msg.len - 9
 
-            if i == *num_blocks_per_piece - 1 {
+            if i == current_num_blocks_per_piece - 1 {
                 break 'outer;
             }
             i += 1;
         }
     }
 
-    file_writer.write_all(&data).await?; // todo rem?
-    file_writer.flush().await?; // todo rem?
-
-    ///////////////////////////////////////////////////////////////////////////////
-
-    // TODO: pipeline by blocks but with multiple peers this time (or by pieces?)
-    // todo: three nested loops?
-
-    // // Outer loop is by batches of blocks, while the inner loop is by peers.
-    // // I am not sure that this brings any speed improvements. todo rem
-    // 'outer: for block_idx in 0..*block_iters {
-    //     for (peer_idx, peer) in work_peers.iter_mut().enumerate().take(*num_peers) {
-    //         *block += 1;
-    //
-    //         if !check_bitfield(peer, *piece_index) {
-    //             // TODO: Don't return, but mark the piece for retry, and do retry somehow.
-    //             return Err(PeerError::MissingPiece(peer.addr, *piece_index));
-    //         }
-    //
-    //         // Exchange messages with the peer
-    //
-    //         // Send a Request message for each block - we don't request pieces but blocks.
-    //         let index = *piece_index as u32;
-    //         let begin = u32::try_from(i * *block_len)?;
-    //         let mut length = *block_len as u32;
-    //         if *is_last_piece && i == *num_blocks_per_piece - 1 {
-    //             length = *last_block_len as u32;
-    //         }
-    //         let msg = Message::new(
-    //             MessageId::Request,
-    //             Some(RequestPayload::new(index, begin, length).into()),
-    //         );
-    //         debug!(
-    //             "block {block:3}/{total_num_blocks}, i = {i:3}: block_idx = {block_idx}, \
-    //              peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
-    //         );
-    //         eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
-    //         peer.send_msg(msg).await.context("Request")?;
-    //
-    //         // Wait for a Piece message for each block we've requested.
-    //         let msg = peer.recv_msg().await.context("Piece")?;
-    //         if msg.id != MessageId::Piece {
-    //             return Err(PeerError::from((msg.id, MessageId::Piece)));
-    //         }
-    //
-    //         let payload = &msg.payload.expect("Expected to have received some payload")[8..];
-    //         hasher.update(payload); //todo
-    //         file_writer.write_all(payload).await?; //todo
-    //         // contents.extend(payload);todo rem
-    //
-    //         if i == *num_blocks_per_piece - 1 {
-    //             break 'outer;
-    //         }
-    //
-    //         i += 1;
-    //     }
-    // }
+    file_writer.write_all(&data[..current_piece_len]).await?;
+    file_writer.flush().await?;
 
     let piece = hex::encode(piece_hash);
     let hash = hex::encode(hasher.finalize());
@@ -704,12 +631,6 @@ async fn fetch_piece(
         // TODO: Handle this in `download()`!
         return Err(PeerError::HashMismatch(piece, hash));
     }
-
-    // Ok(Block { // todo: rem
-    //     piece: *piece_index,
-    //     block: *block,
-    //     data,
-    // })
 
     // Ok(Piece { // todo: uncomment?
     //     piece: *piece_index,
@@ -770,28 +691,23 @@ fn peer_has_piece(peer: &Peer, piece_index: usize) -> bool {
 /// Checks all peers for the given piece and tries to find one that has it.
 ///
 /// Returns the first peer for which it determines that it has the piece.
+/// This could be randomized.
 ///
 /// # Returns
-/// A tuple of:
-/// - `peer_idx`: `usize`, index of the peer in the list of peers, `work_peers` (could be made the only returned value), todo update
-/// - `peer`: `&Peer`, the peer itself (could be fetched outside of this function by means of `peer_idx`). todo rem
+/// - `peer_idx`: `usize`, index of the peer in the list of peers, `work_peers`
 ///
 /// # Errors
 /// - [`PeerError::NoPeerHasPiece`], in case no peer has the piece.
 fn check_all_peers_for_piece(work_peers: &[Peer], piece_index: usize) -> Result<usize, PeerError> {
-    // ) -> Result<(usize, &Peer), PeerError> { // todo rem
     let mut pi = 0;
 
-    // let (peer_idx, peer, found) = loop { // todo rem
     let (peer_idx, found) = loop {
         let p = &work_peers[pi];
         if peer_has_piece(p, piece_index) {
-            // break (pi, p, true); // todo rem
             break (pi, true);
         }
         info!("{}", PeerError::MissingPiece(p.addr, piece_index));
         if pi == work_peers.len() - 1 {
-            // break (0, &work_peers[0], false); // todo rem
             break (0, false);
         }
         pi += 1;
@@ -802,37 +718,4 @@ fn check_all_peers_for_piece(work_peers: &[Peer], piece_index: usize) -> Result<
     }
 
     Ok(peer_idx)
-    // Ok((peer_idx, peer)) // todo rem
 }
-
-// todo rem
-// struct Piece {
-//     piece: usize,
-//     data: Vec<u8>, // todo: Option<>?
-// }
-
-// todo rem
-// struct Block {
-//     piece: usize,
-//     block: usize,
-//     data: Vec<u8>,
-// }
-
-// // TODO: rem
-// pub struct Piece {
-//     index: usize,
-//     data: Vec<u8>,
-//     correct_hash: String, // todo: not necessary?
-//     calc_hash: String,    // todo: not necessary?
-// }
-
-// // TODO: rem
-// /// A helper function that is used for exchanging messages with the peers
-// /// for getting blocks (sub-pieces) of data from them.
-// ///
-// /// Works with multiple peers and in a pipelined fashion, for improved download speed.
-// ///
-// /// Sends requests to peers, and gets responses from them.
-// async fn get_blocks(file: File) -> Result<(), PeerError> {
-//     Ok(())
-// }

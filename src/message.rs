@@ -296,6 +296,10 @@ impl<'a> TryFrom<&'a Message> for PiecePayload<'a> {
     /// Validates the payload length against the message length.
     ///
     /// Uses `PiecePayload::try_from(value: &'a [u8])`.
+    ///
+    /// # Errors
+    /// If message length is different from payload length increased by one,
+    /// returns [`PiecePayloadError::WrongLen`].
     fn try_from(value: &'a Message) -> Result<PiecePayload, PiecePayloadError> {
         let payload: &[u8] = value
             .payload
@@ -303,8 +307,8 @@ impl<'a> TryFrom<&'a Message> for PiecePayload<'a> {
             .context("Expected to have received some payload")?;
 
         let msg_len = value.len as usize;
-        if 1 + payload.len() != msg_len {
-            return Err(PiecePayloadError::WrongLen(1 + payload.len(), msg_len));
+        if msg_len != 1 + payload.len() {
+            return Err(PiecePayloadError::WrongLen(msg_len, 1 + payload.len()));
         }
 
         payload.try_into()
