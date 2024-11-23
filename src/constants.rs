@@ -4,6 +4,8 @@
 
 use std::ops::Range;
 
+pub const CONFIG_FILE_PATH: &str = "config.json";
+
 /// Length of the used hash sum, which is the [`sha1::Sha1`] sum, and its length is always 20
 pub const SHA1_LEN: usize = 20;
 

@@ -11,6 +11,7 @@ use clap::Parser;
 use log::info;
 
 use bittorrent_starter_rust::cli::{Args, Commands};
+use bittorrent_starter_rust::config::get_config;
 use bittorrent_starter_rust::decode::decode_bencoded_value;
 use bittorrent_starter_rust::errors::ae2s;
 use bittorrent_starter_rust::meta_info::meta_info;
@@ -23,6 +24,7 @@ async fn main() -> Result<(), String> {
     info!("Starting the app");
 
     let args = Args::parse();
+    let config = get_config();
 
     match &args.command {
         Commands::Decode { encoded_value } => {
@@ -46,10 +48,10 @@ async fn main() -> Result<(), String> {
             torrent,
             piece_index,
         } => {
-            download_piece(output, torrent, *piece_index).await?;
+            download_piece(config, output, torrent, *piece_index).await?;
         }
         Commands::Download { output, torrent } => {
-            download(output, torrent).await?;
+            download(config, output, torrent).await?;
         }
     }
 

@@ -71,7 +71,9 @@ The assignment itself only supports the compact mode.
 
 # Improvements Over the Requirements
 
+- Optional application configuration, through the optional [config.json](config.json) file.
 - Logging.
+- Timing of the whole file download.
 - We check the Bitfield message payload to see whether a peer has the piece that we need.
     - The challenge doesn't require this as all their peers have all the required pieces during testing.
 - We pipeline requests to a single peer for increased download speed. This was suggested as optional

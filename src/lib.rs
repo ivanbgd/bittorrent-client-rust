@@ -1,6 +1,7 @@
 //! # A BitTorrent Client Library
 
 pub mod cli;
+pub mod config;
 pub mod constants;
 pub mod decode;
 pub mod errors;

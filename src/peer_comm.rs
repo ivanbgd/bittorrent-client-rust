@@ -35,19 +35,20 @@
 use std::cmp::min;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
+use std::time::Instant;
 
-use anyhow::{Context, Result};
-use log::{debug, info};
-use sha1::{Digest, Sha1};
-use tokio::fs::File;
-use tokio::io::{AsyncWriteExt, BufWriter};
-
-use crate::constants::{BLOCK_SIZE, MAX_NUM_PEERS, MAX_PIPELINED_REQUESTS, SHA1_LEN};
+use crate::config::Config;
+use crate::constants::{BLOCK_SIZE, SHA1_LEN};
 use crate::errors::PeerError;
 use crate::message::{Message, MessageId, RequestPayload};
 use crate::meta_info::Info;
 use crate::peer::Peer;
 use crate::tracker::get_peers;
+use anyhow::{Context, Result};
+use log::{debug, info};
+use sha1::{Digest, Sha1};
+use tokio::fs::File;
+use tokio::io::{AsyncWriteExt, BufWriter};
 
 /// Sends a handshake to a single peer, and receives a handshake from the peer, in the same format.
 ///
@@ -94,6 +95,7 @@ struct WorkParams {
 /// Downloads a single piece of a file and stores it.
 ///
 /// Arguments:
+/// - config: [`Config`], application configuration,
 /// - output: &[`PathBuf`], path to the output file for storing the downloaded piece
 /// - torrent: &[`PathBuf`], path to a torrent file
 /// - piece_index: [`usize`], zero-based piece index
@@ -109,6 +111,7 @@ struct WorkParams {
 ///
 /// `$ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
 pub async fn download_piece(
+    config: Config,
     output: &PathBuf,
     torrent: &PathBuf,
     piece_index: usize,
@@ -135,7 +138,7 @@ pub async fn download_piece(
 
     // Support working with multiple peers at the same time
     // let (mut work_peers, block_iters) = local_get_peers(work_params).await?; // todo rem
-    let mut work_peers = local_get_peers(work_params).await?;
+    let mut work_peers = local_get_peers(config.max_num_peers, work_params).await?;
     let peer_idx = check_all_peers_for_piece(&work_peers, piece_index)?;
     let peer = &mut work_peers[peer_idx];
     // let num_peers = work_peers.len(); // todo rem
@@ -157,7 +160,7 @@ pub async fn download_piece(
         piece_hash,
     };
 
-    let piece = fetch_piece(&block_params, peer_idx, peer, &mut block).await?;
+    let piece = fetch_piece(&config, &block_params, peer_idx, peer, &mut block).await?;
 
     file_writer.write_all(&piece.data).await?;
     file_writer.flush().await?;
@@ -172,11 +175,16 @@ pub async fn download_piece(
 /// Downloads a whole file and stores it.
 ///
 /// Arguments:
+/// - config: [`Config`], application configuration,
 /// - output: &[`PathBuf`], path to the output file for storing the whole downloaded file
 /// - torrent: &[`PathBuf`], path to a torrent file
 ///
 /// `$ ./your_bittorrent.sh download -o /tmp/test.txt sample.torrent`
-pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerError> {
+pub async fn download(
+    config: Config,
+    output: &PathBuf,
+    torrent: &PathBuf,
+) -> Result<(), PeerError> {
     let file = File::create(output).await?;
     let mut file_writer = BufWriter::new(file);
 
@@ -197,7 +205,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
 
     // Support working with multiple peers at the same time
     // let (mut work_peers, mut block_iters) = local_get_peers(work_params).await?; // todo rem
-    let mut work_peers = local_get_peers(work_params).await?;
+    let mut work_peers = local_get_peers(config.max_num_peers, work_params).await?;
     // let mut num_peers = work_peers.len(); // todo rem
 
     // All piece hashes from the torrent file
@@ -205,6 +213,8 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
 
     // // Entire contents of the file
     // let mut contents = vec![];todo
+
+    let start = Instant::now();
 
     // Block index - for logging purposes only
     let mut block = 0usize;
@@ -238,7 +248,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
         ///////
 
         // let piece = fetch_piece(&block_params, &mut work_peers, &mut block).await?; // todo rem
-        let piece = fetch_piece(&block_params, peer_idx, peer, &mut block).await?;
+        let piece = fetch_piece(&config, &block_params, peer_idx, peer, &mut block).await?;
 
         file_writer.write_all(&piece.data).await?;
 
@@ -253,6 +263,7 @@ pub async fn download(output: &PathBuf, torrent: &PathBuf) -> Result<(), PeerErr
 
     check_file_size(file_len, output).await?;
 
+    debug!("Took {:.3?} to complete.", start.elapsed());
     info!("Success!");
 
     Ok(())
@@ -335,7 +346,10 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
 ///
 /// # Returns
 /// - List of peers to work with, `work_peers: Vec<Peer>`,
-async fn local_get_peers(work_params: WorkParams) -> Result<Vec<Peer>, PeerError> {
+async fn local_get_peers(
+    max_num_peers: usize,
+    work_params: WorkParams,
+) -> Result<Vec<Peer>, PeerError> {
     // TODO: rework to just pass in the args directly
     let WorkParams {
         mut peers,
@@ -347,12 +361,15 @@ async fn local_get_peers(work_params: WorkParams) -> Result<Vec<Peer>, PeerError
         ..
     } = work_params;
 
-    // let mut num_peers = min(MAX_NUM_PEERS, num_pcs); // todo rem
+    // let mut num_peers = min(config.max_num_peers, num_pcs); // todo rem
     // if is_last_piece.is_some() && is_last_piece.unwrap() {
     //     num_peers = num_blocks_in_last_piece;
     // } // todo rem
-    let num_peers = min(peers.len(), MAX_NUM_PEERS);
-    debug!("num_peers = {num_peers}; peers.len() = {}", peers.len());
+    let num_peers = min(peers.len(), max_num_peers);
+    debug!(
+        "max_num_peers = {max_num_peers}; num_peers = {num_peers}; peers.len() = {}",
+        peers.len()
+    );
 
     let mut work_peers: Vec<Peer> = Vec::with_capacity(num_peers);
 
@@ -447,6 +464,7 @@ struct BlockParams<'a> {
 /// - [`PeerError::WrongMessageId`], in case we don't receive a [`Piece`] message;
 /// - [`PeerError::HashMismatch`], in case of bad hash value of the received piece.
 async fn fetch_piece(
+    config: &Config,
     block_params: &BlockParams<'_>,
     peer_idx: usize,
     peer: &mut Peer,
@@ -485,8 +503,8 @@ async fn fetch_piece(
         return Err(PeerError::MissingPiece(peer.addr, *piece_index));
     }
 
-    // let num_reqs = MAX_PIPELINED_REQUESTS; // todo rem
-    let num_reqs = min(MAX_PIPELINED_REQUESTS, *num_blocks_per_piece);
+    // let num_reqs = config.max_pipelined_requests; // todo rem
+    let num_reqs = min(config.max_pipelined_requests, *num_blocks_per_piece);
     let block_iters =
         num_blocks_per_piece / num_reqs + (num_blocks_per_piece % num_reqs).clamp(0, 1);
     debug!("num_reqs = {num_reqs}, block_iters = {block_iters}");

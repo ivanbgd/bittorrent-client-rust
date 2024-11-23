@@ -1,0 +1,4 @@
+{
+  "max_num_peers": 32,
+  "max_pipelined_requests": 32
+}
