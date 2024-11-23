@@ -281,44 +281,30 @@ pub struct PiecePayload<'a> {
     pub block: &'a [u8],
 }
 
-impl<'a> PiecePayload<'a> {
-    /// Creates a new piece payload consisting of piece index, byte offset within the piece
-    /// and block of data from a message received from a peer.
-    pub fn new(index: u32, begin: u32, block: &'a [u8]) -> Self {
-        Self {
-            index,
-            begin,
-            block,
-        }
-    }
-}
-
 /// Converts a reference to a [`MessageId::Piece`] into a [`PiecePayload`].
 impl<'a> From<&'a Message> for PiecePayload<'a> {
     /// Converts a reference to a [`MessageId::Piece`] into a [`PiecePayload`].
+    ///
+    /// Checks the message and payload lengths.
+    ///
+    /// Uses `PiecePayload::from(value: &'a [u8])`.
     fn from(value: &'a Message) -> PiecePayload {
-        let payload = &value
+        let payload: &[u8] = value
             .payload
             .as_ref()
-            .expect("Expected to have received some payload");
+            .expect("Expected to have received some payload") // TODO: Add proper error handling. Implement [`TryFrom`] instead.
+            .as_ref();
 
         let msg_len = value.len as usize;
         if msg_len != 1 + payload.len() {
             warn!("piece message length {msg_len} != 1 + {}", payload.len()); // TODO: Add proper error handling. Implement [`TryFrom`] instead.
         }
 
-        let index = u32::from_be_bytes(payload[0..4].try_into().expect("failed to convert index"));
-        let begin = u32::from_be_bytes(payload[4..8].try_into().expect("failed to convert begin"));
-        let block = &payload[8..];
-
-        Self {
-            index,
-            begin,
-            block,
-        }
+        payload.into()
     }
 }
 
+// TODO: Implement [`TryFrom`] instead.
 /// Converts a byte stream into a [`PiecePayload`].
 impl<'a> From<&'a [u8]> for PiecePayload<'a> {
     /// Deserializes a [`PiecePayload`] received from a wire transfer.

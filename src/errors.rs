@@ -3,6 +3,7 @@
 //! Error types and helper functions used in the application
 
 use std::array::TryFromSliceError;
+use std::io;
 use std::net::SocketAddrV4;
 use std::num::TryFromIntError;
 
@@ -14,7 +15,7 @@ use crate::message::MessageId;
 #[derive(Debug, Error)]
 pub enum MetaInfoError {
     #[error("I/O error: {0}")]
-    IoError(#[from] std::io::Error),
+    IoError(#[from] io::Error),
 
     #[error("Deserialize error: {0}")]
     DeserializeError(#[from] serde_bencode::Error),
@@ -58,8 +59,8 @@ pub enum MessageCodecError {
     LengthError(String),
 }
 
-impl From<std::io::Error> for MessageCodecError {
-    fn from(value: std::io::Error) -> Self {
+impl From<io::Error> for MessageCodecError {
+    fn from(value: io::Error) -> Self {
         MessageCodecError::LengthError(value.to_string())
     }
 }
@@ -103,8 +104,8 @@ pub enum PeerError {
     Other(#[from] anyhow::Error),
 }
 
-impl From<std::io::Error> for PeerError {
-    fn from(value: std::io::Error) -> Self {
+impl From<io::Error> for PeerError {
+    fn from(value: io::Error) -> Self {
         // PeerError::HandshakeError(value.to_string())
         PeerError::Other(anyhow::Error::from(value))
     }
