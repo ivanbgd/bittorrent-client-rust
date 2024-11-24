@@ -122,7 +122,7 @@ pub async fn download_piece(
         num_blocks_in_last_piece,
         last_block_len,
         ..
-    } = work_params.clone();
+    } = work_params;
 
     if piece_index >= num_pcs {
         return Err(PeerError::WrongPieceIndex(piece_index, num_pcs));
@@ -189,13 +189,14 @@ pub async fn download_piece(
 /// - output: &[`PathBuf`], path to the output file for storing the whole downloaded file
 /// - torrent: &[`PathBuf`], path to a torrent file
 ///
+/// Supports working with multiple peers at once.
+///
 /// `$ ./your_bittorrent.sh download -o /tmp/test.txt sample.torrent`
 ///
 /// # Errors
 /// - [`std::io::Error`], in case it can't create the output file,
 /// - [`crate::errors::TrackerError`], in case it can't get peers,
 /// - [`PeerError`], various variants, in case of various errors.
-// TODO: Handle errors!
 pub async fn download(
     config: Config,
     output: &PathBuf,
@@ -215,7 +216,7 @@ pub async fn download(
         num_blocks_in_last_piece,
         last_block_len,
         total_num_blocks,
-    } = work_params.clone();
+    } = work_params;
 
     // Support working with multiple peers at the same time
     let mut work_peers = local_get_peers(&mut peers, &info, config.max_num_peers).await?;
@@ -246,12 +247,12 @@ pub async fn download(
             piece_hash,
         };
 
-        ///////
-        // TODO: Change! Devise a proper way of assigning pieces to peers!
-        let peer_idx = find_peer_for_piece(&work_peers, piece_index)?; // todo: don't do this
+        // It is significantly faster to work with only one peer that has all pieces (a seeder),
+        // but we can't rely on that.
+        let peer_idx = find_peer_for_piece(&work_peers, piece_index)?;
         let peer = &mut work_peers[peer_idx];
-        ///////
 
+        // TODO: The execution can block if a peer doesn't have a piece, because we ask for pieces in succession in a loop.
         // TODO: Handle errors properly! Repeat the piece somehow in case of an error!
         fetch_piece(
             &config,
@@ -283,7 +284,7 @@ pub async fn download(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct WorkParams {
     peers: Vec<SocketAddrV4>,
     info: Info,
@@ -294,7 +295,7 @@ struct WorkParams {
     block_len: usize,
     num_blocks_per_piece: usize,
     num_blocks_in_last_piece: usize,
-    last_block_len: usize, // todo: rem ?
+    last_block_len: usize,
     total_num_blocks: usize,
 }
 
@@ -462,6 +463,7 @@ async fn local_get_peers(
     Ok(work_peers)
 }
 
+/// Parameters for the [`fetch_piece`] function.
 #[derive(Debug)]
 struct PieceParams<'a> {
     num_pcs: usize,
@@ -489,7 +491,7 @@ struct PieceParams<'a> {
 /// Source (PDF): [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf)
 /// Also see: https://wiki.theory.org/BitTorrentSpecification#Queuing
 ///
-/// The piece is assembled in memory and written to storage as such after validating its hash. // TODO: modify?
+/// The piece is assembled in memory and written to storage in its entirety after validating its hash. // TODO: modify?
 ///
 /// # Returns
 /// - [`Piece`], in case the peer has it, and we successfully received it and validated its hash value. // TODO: remove?
@@ -541,7 +543,7 @@ async fn fetch_piece(
         current_num_blocks_per_piece = {current_num_blocks_per_piece}"
     );
 
-    let piece_offset = *piece_index * *piece_len;
+    let piece_offset = *piece_index * *piece_len; // TODO: make use of this?
     trace!("piece_index {piece_index} * piece_len {piece_len} = piece_offset {piece_offset}");
 
     // The entire Piece data
@@ -555,11 +557,6 @@ async fn fetch_piece(
     let mut i = 0usize;
 
     // Fetch blocks from a single peer
-
-    ///////////////////////////////////////////////////////////////////////////////
-    // TODO: Use block indices and assemble them in order.
-    // What we currently have works, because we work with only one peer, but messages can in general
-    // be received out of order over the network, in either way, even with one peer, I suppose.
 
     let num_reqs = min(config.max_pipelined_requests, current_num_blocks_per_piece);
     let block_iters = current_num_blocks_per_piece / num_reqs
@@ -591,7 +588,7 @@ async fn fetch_piece(
                 "block {block:3}/{total_num_blocks}, i = {i:3}: blk_i = {block_idx}, \
                  peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
             );
-            // eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
+            eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: piece index = {index}, begin = {begin}, length = {length}"); //todo rem
             peer.feed(msg).await.context("Feed a Request message")?;
 
             if i == current_num_blocks_per_piece - 1 {
@@ -600,7 +597,9 @@ async fn fetch_piece(
             i += 1;
             j += 1;
         }
-        peer.flush().await.context("Flush a Request message")?;
+        peer.flush()
+            .await
+            .context("Flush a batch of Request messages")?;
         i -= j;
 
         // Receive a Piece message for each block we've requested. Pieces could arrive out of order in general case.
@@ -645,16 +644,18 @@ async fn fetch_piece(
         return Err(PeerError::HashMismatch(piece, hash));
     }
 
-    // Ok(Piece { // todo: uncomment?
-    //     piece: *piece_index,
+    // Ok(Piece { // todo: uncomment? length is missing - the last piece is smaller.
+    //     index: *piece_index,
     //     data,
     // })
 
     Ok(())
 }
 
+/// Piece index and data
+#[derive(Debug)]
 struct Piece<'a> {
-    piece: usize,
+    index: usize,
     data: &'a [u8],
 }
 
