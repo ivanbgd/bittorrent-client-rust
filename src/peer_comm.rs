@@ -566,7 +566,8 @@ fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<Work
 /// - `work_peers`: `Vec<Peer>`, list of peers to work with
 ///
 /// # Errors
-/// - [`PeerError`] wrapping another error, in case it can't send a [`MessageId::Interested`] message to the peer,
+/// - [`PeerError::Other`] wrapping another error, in case it can't send a [`MessageId::Interested`]
+///   message to the peer,
 /// - [`PeerError::NoPeers`], in case it doesn't find a peer to work with.
 async fn local_get_peers(
     peers: &mut [SocketAddrV4],

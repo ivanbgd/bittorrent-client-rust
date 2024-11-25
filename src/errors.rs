@@ -128,14 +128,6 @@ pub enum PeerError {
     #[error("No peer has the piece index {0}")]
     NoPeerHasPiece(usize),
 
-    // todo remove
-    // /// No currently available peers.
-    // #[error("No currently available peers.")]
-    // NoCurrentlyAvailablePeers,
-    //
-    // /// No currently available peer has the required piece.
-    // #[error("No currently available peer has the piece index {0}")]
-    // NoCurrentlyAvailablePeerHasPiece(usize),
     /// No currently available peer or piece.
     #[error("No currently available peer or piece index {0}")]
     NoCurrentlyAvailablePeerOrPiece(usize),

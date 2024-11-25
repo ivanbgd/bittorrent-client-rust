@@ -89,7 +89,7 @@ impl Peer {
             self.peer_id = Some(<[u8; SHA1_LEN]>::try_from(peer_id)?);
         } else {
             return Err(PeerError::HandshakeError(format!(
-                "Received handshake parameters from peer {} don't match the sent parameters",
+                "Received handshake parameters from peer {} don't match the sent parameters.",
                 self.addr
             )));
         }
@@ -111,7 +111,7 @@ impl Peer {
     pub(crate) async fn flush(&mut self) -> Result<(), PeerError> {
         let stream = self.stream.as_mut().unwrap_or_else(|| {
             panic!(
-                "Expected the peer {} to have its stream field populated",
+                "Expected the peer {} to have its stream field populated.",
                 self.addr
             )
         });
@@ -130,7 +130,7 @@ impl Peer {
     pub(crate) async fn feed(&mut self, msg: Message) -> Result<(), PeerError> {
         let stream = self.stream.as_mut().unwrap_or_else(|| {
             panic!(
-                "Expected the peer {} to have its stream field populated",
+                "Expected the peer {} to have its stream field populated.",
                 self.addr
             )
         });
@@ -145,7 +145,7 @@ impl Peer {
     pub(crate) async fn _send(&mut self, msg: Message) -> Result<(), PeerError> {
         let stream = self.stream.as_mut().unwrap_or_else(|| {
             panic!(
-                "Expected the peer {} to have its stream field populated",
+                "Expected the peer {} to have its stream field populated.",
                 self.addr
             )
         });
@@ -157,7 +157,7 @@ impl Peer {
     pub(crate) async fn recv_msg(&mut self) -> Result<Message, PeerError> {
         let stream = self.stream.as_mut().unwrap_or_else(|| {
             panic!(
-                "Expected the peer {} to have its stream field populated",
+                "Expected the peer {} to have its stream field populated.",
                 self.addr
             )
         });
