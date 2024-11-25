@@ -126,6 +126,7 @@ pub async fn download_piece(
         num_blocks_per_piece,
         num_blocks_in_last_piece,
         last_block_len,
+        total_num_blocks,
         ..
     } = work_params;
 
@@ -142,10 +143,10 @@ pub async fn download_piece(
 
     let is_last_piece = piece_index == num_pcs - 1;
     let mut current_piece_len = piece_len;
-    let mut total_num_blocks = num_blocks_per_piece;
+    // let mut total_num_blocks = num_blocks_per_piece;
     if is_last_piece {
         current_piece_len = last_piece_len;
-        total_num_blocks = num_blocks_in_last_piece;
+        //     total_num_blocks = num_blocks_in_last_piece;
     }
 
     let piece_params = PieceParams {
@@ -163,12 +164,9 @@ pub async fn download_piece(
         peer_idx,
     };
 
-    // Block index - for logging purposes only
-    let mut block = 0usize;
-
     let mut file = File::create(output).await?;
 
-    fetch_piece(&config, &piece_params, peer, &mut block, &mut file).await?;
+    fetch_piece(&config, &piece_params, peer, &mut file).await?;
 
     // file_writer.write_all(&piece.data).await?;
     // file_writer.flush().await?; // todo rem
@@ -229,9 +227,6 @@ pub async fn download(
     let mut file = File::create(output).await?;
     file.set_len(file_len as u64).await?;
 
-    // Block index - for logging purposes only
-    let mut block = 0usize;
-
     // Download all pieces
     while let Some((piece_index, piece_hash)) = missing_pieces.pop_front() {
         // Find a peer that has the piece, and pop it off the collection.
@@ -265,7 +260,7 @@ pub async fn download(
 
         // TODO: Handle errors properly! Repeat the piece somehow in case of an error!
         // TODO: Namely, put the piece back and put the peer back onto respective queues!
-        fetch_piece(&config, &piece_params, peer, &mut block, &mut file).await?;
+        fetch_piece(&config, &piece_params, peer, &mut file).await?;
 
         // Put the peer back into the collection.
         available_peers.push_back(peer_idx);
@@ -273,7 +268,7 @@ pub async fn download(
         // file_writer.write_all(&piece.data).await?; // todo rem
 
         info!(
-            "piece {:2}/{num_pcs} downloaded and stored",
+            "Piece {:2}/{num_pcs} downloaded and stored.",
             piece_index + 1
         );
         eprintln!("piece {:2}/{num_pcs} downloaded", piece_index + 1); //todo rem
@@ -340,7 +335,6 @@ async fn fetch_piece(
     config: &Config,
     piece_params: &PieceParams<'_>,
     peer: &mut Peer,
-    block: &mut usize,
     file: &mut File,
 ) -> Result<(), PeerError> {
     // ) -> Result<Piece, PeerError> {  // TODO: remove?
@@ -379,6 +373,9 @@ async fn fetch_piece(
     // For validating the hash of the received piece
     let mut hasher = Sha1::new();
 
+    // Index of the first block of this piece among all blocks in the torrent increased by one. Only used for logging.
+    let starting_block = *piece_index * *num_blocks_per_piece + 1;
+
     // The combined loop counter - from both loops; represents the block ordinal number
     let mut i = 0usize;
 
@@ -391,14 +388,12 @@ async fn fetch_piece(
 
     // Pipeline requests to the single peer.
     // Outer loop is by batches of blocks, while the inner loop is by requests to the single peer.
-    'outer: for block_idx in 0..block_iters {
+    'outer: for _block_idx in 0..block_iters {
         let mut j = 0usize;
 
         // Send several requests in a row to the peer, without waiting for responses at this moment.
         // We'll wait for the responses later, in the following loop.
         for _ in 0..num_reqs {
-            *block += 1;
-
             // Send a Request message for each block - we don't request pieces but blocks.
             let index = *piece_index as u32;
             let begin = u32::try_from(i * *block_len)?;
@@ -410,11 +405,12 @@ async fn fetch_piece(
                 MessageId::Request,
                 Some(RequestPayload::new(index, begin, length).into()),
             );
+            let current_block = starting_block + i;
             debug!(
-                "block {block:3}/{total_num_blocks}, i = {i:3}: blk_i = {block_idx}, \
-                 peer_idx = {peer_idx}; pc idx = {index}, begin = {begin}, length = {length}"
+                "-> Blk req {current_block:4}/{total_num_blocks}, i = {i:4}: peer_idx = {peer_idx:2}; \
+                piece_i = {index:3}, begin = {begin:6}, length = {length:5}"
             );
-            eprintln!("block {block:3}/{total_num_blocks}, i = {i:3}: peer_idx = {peer_idx}, piece index = {index}, begin = {begin}, length = {length}"); //todo rem
+            // eprintln!("Blk req {current_block:3}/{total_num_blocks}, i = {i:3}: peer_idx = {peer_idx}, piece index = {index}, begin = {begin}, length = {length}"); //todo rem
             peer.feed(msg).await.context("Feed a Request message")?;
 
             if i == current_num_blocks_per_piece - 1 {
@@ -423,10 +419,10 @@ async fn fetch_piece(
             i += 1;
             j += 1;
         }
+        i -= j;
         peer.flush()
             .await
             .context("Flush a batch of Request messages")?;
-        i -= j;
 
         // Receive a Piece message for each block we've requested. Pieces could arrive out of order in general case.
         for _ in 0..num_reqs {
@@ -447,10 +443,10 @@ async fn fetch_piece(
             // which is used above to get `payload`.
             let length = payload.block.len();
             data[begin..begin + length].copy_from_slice(payload.block);
-            let pc = i + 1;
+            let current_block = starting_block + i;
             trace!(
-                "Received {pc:3}/{current_num_blocks_per_piece}: peer_idx = {peer_idx}; \
-                piece index = {index}, begin = {begin}, length = {length}"
+                "<= Blk rcv {current_block:4}/{total_num_blocks}, i = {i:4}: peer_idx = {peer_idx:2}; \
+                piece_i = {index:3}, begin = {begin:6}, length = {length:5}"
             );
 
             if i == current_num_blocks_per_piece - 1 {
