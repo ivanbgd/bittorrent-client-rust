@@ -33,7 +33,7 @@
 //! `$ ./your_bittorrent.sh download -o /tmp/test-piece sample.torrent`
 
 use std::cmp::min;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::SeekFrom;
 use std::net::SocketAddrV4;
 use std::path::{Path, PathBuf};
@@ -216,13 +216,15 @@ pub async fn download(
     // All piece hashes from the torrent file
     let mut missing_pieces = VecDeque::from_iter(info.pieces.0.iter().enumerate());
 
+    // Maps piece_index (key) to peer_idx (value), for successfully sent requests.
+    // Namely, a Piece message needs to come from the **same** peer to which the corresponding Request message was sent.
+    let mut piece_to_peer: HashMap<usize, usize> = HashMap::with_capacity(info.pieces.0.len());
+
     let mut file = File::create(output).await?;
     file.set_len(file_len as u64).await?;
 
     // For validating the written number of bytes to file against expected file length from the Info dictionary.
     let mut written_total = 0usize;
-
-    // TODO: We should probably tie peer to piece.
 
     // Loop until all pieces have been downloaded and stored successfully.
     'outer: loop {
@@ -230,7 +232,7 @@ pub async fn download(
             break;
         }
 
-        // Send requests to peers. We limit the number of requests to the number of peers.
+        // Send requests to peers. We limit the number of requests to the number of peers (or less).
         for (peer_idx, peer) in work_peers.iter_mut().enumerate() {
             if peer_idx >= missing_pieces.len() {
                 break;
@@ -260,14 +262,20 @@ pub async fn download(
                 missing_pieces.push_back((piece_index, piece_hash));
                 continue;
             }
+
+            piece_to_peer.insert(piece_index, peer_idx);
         }
 
-        // Receive pieces from peers. We limit the number of receives to the number of peers.
+        // Receive pieces from peers. We limit the number of receives to the number of peers (or less).
         for (peer_idx, peer) in work_peers.iter_mut().enumerate() {
             let (piece_index, piece_hash) = match missing_pieces.pop_front() {
                 Some((piece_index, piece_hash)) => (piece_index, piece_hash),
                 None => break 'outer,
             };
+
+            if peer_idx != piece_to_peer[&piece_index] {
+                continue;
+            }
 
             let piece_offset = piece_index * piece_len;
 
@@ -293,6 +301,8 @@ pub async fn download(
                 continue;
             }
 
+            piece_to_peer.remove(&piece_index);
+
             info!(
                 "Piece {:2}/{num_pcs} downloaded and stored.",
                 piece_index + 1
@@ -301,7 +311,7 @@ pub async fn download(
         }
     }
 
-    debug!("Calculated file hash: {}", calc_file_hash(output).await?);
+    debug!("Calculated file SHA1: {}", calc_file_hash(output).await?);
 
     check_file_size(file_len, written_total, output).await?;
 
@@ -481,10 +491,6 @@ async fn recv_piece(
         peer_idx,
         ..
     } = piece_params;
-
-    if !peer_has_piece(peer, *piece_index) {
-        return Err(PeerError::MissingPiece(peer.addr, *piece_index));
-    }
 
     let is_last_piece = *piece_index == *num_pcs - 1;
     let mut current_piece_len = *piece_len;
