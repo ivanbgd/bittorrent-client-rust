@@ -222,6 +222,8 @@ pub async fn download(
     // For validating the written number of bytes to file against expected file length from the Info dictionary.
     let mut written_total = 0usize;
 
+    // TODO: We should probably tie peer to piece.
+
     // Loop until all pieces have been downloaded and stored successfully.
     'outer: loop {
         if missing_pieces.is_empty() {
@@ -254,12 +256,13 @@ pub async fn download(
             };
 
             if send_reqs(&config, &piece_params, peer).await.is_err() {
+                missing_pieces.pop_front();
                 missing_pieces.push_back((piece_index, piece_hash));
                 continue;
             }
         }
 
-        // Receive pieces from peers. We limit the number of requests to the number of peers.
+        // Receive pieces from peers. We limit the number of receives to the number of peers.
         for (peer_idx, peer) in work_peers.iter_mut().enumerate() {
             let (piece_index, piece_hash) = match missing_pieces.pop_front() {
                 Some((piece_index, piece_hash)) => (piece_index, piece_hash),
@@ -303,7 +306,7 @@ pub async fn download(
     check_file_size(file_len, written_total, output).await?;
 
     info!("Success! Took {:.3?} to complete.", start.elapsed());
-    eprintln!("Success! Took {:.3?} to complete.", start.elapsed()); // todo: comment-out
+    eprintln!("Success! Took {:.3?} to complete.", start.elapsed()); // todo rem
 
     Ok(())
 }
