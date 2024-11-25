@@ -88,7 +88,12 @@ The assignment itself only supports the compact mode.
 
 # Possible Improvements
 
+- Make the application work for real-life single-file torrents.
+- Make the application work for real-life multiple-file torrents.
 - Send keep-alive messages to connected peers.
 - Discover new peers at regular time intervals, but this is not required in the challenge.
+- Whenever a piece is successfully downloaded and written to file, store the necessary information (work parameters)
+  in a file that can be used to resume download of the file when the application is restarted, if the file hasn't
+  been downloaded fully.
 - The [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf) (PDF) has more ideas,
   but none of them are required in this challenge.

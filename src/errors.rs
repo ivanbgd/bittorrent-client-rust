@@ -150,6 +150,9 @@ pub enum PeerError {
     #[error("Hash mismatch: expected {0}, calculated {1}")]
     HashMismatch(String, String),
 
+    #[error("Wrong number of bytes written to file: expected {0}, got {1} bytes")]
+    WrongWritten(usize, usize),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
