@@ -56,7 +56,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 /// A collection of peers that we are not currently downloading anything from.
-type AvailablePeers = VecDeque<usize>;
+type _AvailablePeers = VecDeque<usize>;
 
 /// Sends a handshake to a single peer, and receives a handshake from the peer, in the same format.
 ///
@@ -228,6 +228,7 @@ pub async fn download(
 
     // Send requests to peers.
     while let Some((piece_index, piece_hash)) = missing_pieces.pop_front() {
+        // let peer_idx = find_peer_for_piece(&work_peers, piece_index)?;
         let peer = &mut work_peers[peer_idx];
 
         let piece_offset = piece_index * piece_len;
@@ -247,16 +248,22 @@ pub async fn download(
             peer_idx,
         };
 
-        send_reqs(&config, &piece_params, peer).await?;
+        if send_reqs(&config, &piece_params, peer).await.is_err() {
+            missing_pieces.push_back((piece_index, piece_hash));
+            continue;
+        }
 
         peer_idx = (peer_idx + 1) % work_peers.len();
     }
 
     missing_pieces = VecDeque::from_iter(info.pieces.0.iter().enumerate());
+
+    // A Piece message needs to come from the SAME peer to which a corresponding Request message was issued!
     peer_idx = 0;
 
     // Receive pieces from peers.
     while let Some((piece_index, piece_hash)) = missing_pieces.pop_front() {
+        // let peer_idx = find_peer_for_piece(&work_peers, piece_index)?;
         let peer = &mut work_peers[peer_idx];
 
         let piece_offset = piece_index * piece_len;
@@ -276,7 +283,13 @@ pub async fn download(
             peer_idx,
         };
 
-        recv_pieces(&config, &piece_params, peer, &mut file).await?;
+        if recv_pieces(&config, &piece_params, peer, &mut file)
+            .await
+            .is_err()
+        {
+            missing_pieces.push_back((piece_index, piece_hash));
+            continue;
+        }
 
         peer_idx = (peer_idx + 1) % work_peers.len();
 
@@ -340,10 +353,10 @@ async fn send_reqs(
         current_num_blocks_per_piece = *num_blocks_in_last_piece;
     }
     trace!(
-        "is_last_piece = {is_last_piece}, current_piece_len = {current_piece_len}, \
+        "-> is_last_piece = {is_last_piece}, current_piece_len = {current_piece_len}, \
         current_num_blocks_per_piece = {current_num_blocks_per_piece}"
     );
-    trace!("piece_index {piece_index} * piece_len {piece_len} = piece_offset {piece_offset}");
+    trace!("-> piece_index {piece_index} * piece_len {piece_len} = piece_offset {piece_offset}");
 
     // Index of the first block of this piece among all blocks in the torrent increased by one. Only used for logging.
     let starting_block = *piece_index * *num_blocks_per_piece + 1;
@@ -354,7 +367,10 @@ async fn send_reqs(
     let num_reqs = min(config.max_pipelined_requests, current_num_blocks_per_piece);
     let block_iters = current_num_blocks_per_piece / num_reqs
         + (current_num_blocks_per_piece % num_reqs).clamp(0, 1);
-    trace!("num_reqs = {num_reqs}, block_iters = {block_iters}");
+    trace!(
+        "-> num_reqs = {num_reqs}, block_iters = {block_iters}, peer_idx = {peer_idx}, peer = {}",
+        peer.addr
+    );
 
     // Pipeline requests to the single peer.
     // Outer loop is by batches of blocks, while the inner loop is by requests to the single peer.
@@ -380,7 +396,7 @@ async fn send_reqs(
                 "-> Blk req {current_block:4}/{total_num_blocks}, i = {i:4}: peer_idx = {peer_idx:2}; \
                 piece_i = {index:3}, begin = {begin:6}, length = {length:5}"
             );
-            // eprintln!("Blk req {current_block:3}/{total_num_blocks}, i = {i:3}: peer_idx = {peer_idx}, piece index = {index}, begin = {begin}, length = {length}"); //todo rem
+            // eprintln!("-> Blk req {current_block:3}/{total_num_blocks}, i = {i:3}: peer_idx = {peer_idx}, piece index = {index}, begin = {begin}, length = {length}"); //todo rem
             peer.feed(msg).await.context("Feed a Request message")?;
 
             if i == current_num_blocks_per_piece - 1 {
@@ -441,10 +457,10 @@ async fn recv_pieces(
         current_num_blocks_per_piece = *num_blocks_in_last_piece;
     }
     trace!(
-        "is_last_piece = {is_last_piece}, current_piece_len = {current_piece_len}, \
+        "<= is_last_piece = {is_last_piece}, current_piece_len = {current_piece_len}, \
         current_num_blocks_per_piece = {current_num_blocks_per_piece}"
     );
-    trace!("piece_index {piece_index} * piece_len {piece_len} = piece_offset {piece_offset}");
+    trace!("<= piece_index {piece_index} * piece_len {piece_len} = piece_offset {piece_offset}");
 
     // The entire Piece data
     let mut data = [0u8; MAX_PIECE_SIZE];
@@ -461,7 +477,10 @@ async fn recv_pieces(
     let num_reqs = min(config.max_pipelined_requests, current_num_blocks_per_piece);
     let block_iters = current_num_blocks_per_piece / num_reqs
         + (current_num_blocks_per_piece % num_reqs).clamp(0, 1);
-    trace!("num_reqs = {num_reqs}, block_iters = {block_iters}");
+    trace!(
+        "<= num_reqs = {num_reqs}, block_iters = {block_iters}, peer_idx = {peer_idx}, peer = {}",
+        peer.addr
+    );
 
     // Fetch blocks from a single peer.
     // Receive a Piece message for each block we've requested. Pieces could arrive out of order in general case.
@@ -497,15 +516,15 @@ async fn recv_pieces(
         }
     }
 
-    file.seek(SeekFrom::Start(*piece_offset as u64)).await?;
-    file.write_all(&data[..current_piece_len]).await?;
-    file.flush().await?;
-
     let piece = hex::encode(piece_hash);
     let hash = hex::encode(hasher.finalize());
     if piece != hash {
         return Err(PeerError::HashMismatch(piece, hash));
     }
+
+    file.seek(SeekFrom::Start(*piece_offset as u64)).await?;
+    file.write_all(&data[..current_piece_len]).await?;
+    file.flush().await?;
 
     Ok(())
 }
@@ -682,16 +701,16 @@ async fn _fetch_piece(
         }
     }
 
-    // let mut file_writer = BufWriter::with_capacity(current_piece_len, file); // todo remove
-    file.seek(SeekFrom::Start(*piece_offset as u64)).await?;
-    file.write_all(&data[..current_piece_len]).await?;
-    file.flush().await?;
-
     let piece = hex::encode(piece_hash);
     let hash = hex::encode(hasher.finalize());
     if piece != hash {
         return Err(PeerError::HashMismatch(piece, hash));
     }
+
+    // let mut file_writer = BufWriter::with_capacity(current_piece_len, file); // todo remove
+    file.seek(SeekFrom::Start(*piece_offset as u64)).await?;
+    file.write_all(&data[..current_piece_len]).await?;
+    file.flush().await?;
 
     // Ok(Piece { // todo: uncomment? length is missing - the last piece is smaller.
     //     index: *piece_index,
@@ -1014,9 +1033,9 @@ fn _find_peers_for_piece(work_peers: &[Peer], piece_index: usize) -> Result<Vec<
 /// # Errors
 /// - [`PeerError::PeerError::NoCurrentlyAvailablePeerOrPiece`], in case there are no currently available peers.
 /// - [`PeerError::PeerError::NoCurrentlyAvailablePeerOrPiece`], in case no currently available peer has the piece.
-fn find_available_peer_for_piece(
+fn _find_available_peer_for_piece(
     work_peers: &[Peer],
-    available_peers: &mut AvailablePeers,
+    available_peers: &mut _AvailablePeers,
     piece_index: usize,
 ) -> Result<usize, PeerError> {
     if available_peers.is_empty() {

@@ -89,6 +89,10 @@ pub enum MessageId {
     ///   - index: integer specifying the zero-based piece index
     ///   - begin: integer specifying the zero-based byte offset within the piece
     ///   - block: block of data, which is a subset of the piece specified by index
+    ///
+    /// Note that the `piece` messages are correlated with `request` messages implicitly.
+    /// It's possible for an unexpected `piece` to arrive if `choke` and `unchoke` messages
+    /// are sent in quick succession and/or transfer is going very slowly.
     Piece = 7,
 
     /// cancel: `<len=0013><id=8><index><begin><length>`

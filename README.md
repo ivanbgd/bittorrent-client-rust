@@ -88,6 +88,7 @@ The assignment itself only supports the compact mode.
 
 # Possible Improvements
 
+- Send keep-alive messages to connected peers.
 - Discover new peers at regular time intervals, but this is not required in the challenge.
 - The [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf) (PDF) has more ideas,
   but none of them are required in this challenge.
