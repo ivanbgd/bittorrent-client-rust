@@ -116,7 +116,8 @@ pub enum PeerError {
     #[error("Wrong message ID: {0}; expected {1}")]
     WrongMessageId(MessageId, MessageId),
 
-    #[error("No useful peers could be found.")]
+    /// Used at the beginning, if we can't find any per to work with at all.
+    #[error("No peers to work with could be found.")]
     NoPeers,
 
     /// The peer doesn't have the piece.
@@ -126,6 +127,18 @@ pub enum PeerError {
     /// No peer has the required piece.
     #[error("No peer has the piece index {0}")]
     NoPeerHasPiece(usize),
+
+    // todo remove
+    // /// No currently available peers.
+    // #[error("No currently available peers.")]
+    // NoCurrentlyAvailablePeers,
+    //
+    // /// No currently available peer has the required piece.
+    // #[error("No currently available peer has the piece index {0}")]
+    // NoCurrentlyAvailablePeerHasPiece(usize),
+    /// No currently available peer or piece.
+    #[error("No currently available peer or piece index {0}")]
+    NoCurrentlyAvailablePeerOrPiece(usize),
 
     #[error("Wrong piece index: {0}; expected index < {1}")]
     WrongPieceIndex(usize, usize),

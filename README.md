@@ -83,9 +83,8 @@ The assignment itself only supports the compact mode.
 - We also added working with multiple peers at once, on top of pipelining requests to a single peer.  
   This was also suggested as optional, but not required.  
   Still, this is something that is required in case of real-life torrents.
-  Namely, we cannot rely on a single peer having all pieces, in real life. In the challenge's test suite, they do.   
-  We try to find a peer that has a piece, for every piece. If multiple peers happen to have a piece,
-  we choose one randomly.
+  Namely, we cannot rely on a single peer having all pieces in real life. In the challenge's test suite, they do.   
+  We try to find a peer that has a piece, for every piece.
 
 # Possible Improvements
 
