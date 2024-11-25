@@ -218,24 +218,16 @@ pub async fn download(
     // All piece hashes from the torrent file
     let mut missing_pieces = VecDeque::from_iter(info.pieces.0.iter().enumerate());
 
-    let mut available_peers = AvailablePeers::from_iter(0..work_peers.len());
+    // // Currently available (idle) peers
+    // let mut available_peers = AvailablePeers::from_iter(0..work_peers.len()); // todo remove
 
     let mut file = File::create(output).await?;
     file.set_len(file_len as u64).await?;
 
+    let mut peer_idx = 0usize;
+
     // Send requests to peers.
     while let Some((piece_index, piece_hash)) = missing_pieces.pop_front() {
-        // Find a peer that has the piece, and pop it off the collection.
-        let peer_idx =
-            match find_available_peer_for_piece(&work_peers, &mut available_peers, piece_index) {
-                Ok(peer_idx) => peer_idx,
-                Err(_) => {
-                    missing_pieces.push_back((piece_index, piece_hash));
-                    continue;
-                }
-            };
-        // Don't forget to put it back! We can do it right away!
-        available_peers.push_back(peer_idx);
         let peer = &mut work_peers[peer_idx];
 
         let piece_offset = piece_index * piece_len;
@@ -256,23 +248,15 @@ pub async fn download(
         };
 
         send_reqs(&config, &piece_params, peer).await?;
+
+        peer_idx = (peer_idx + 1) % work_peers.len();
     }
 
     missing_pieces = VecDeque::from_iter(info.pieces.0.iter().enumerate());
+    peer_idx = 0;
 
     // Receive pieces from peers.
     while let Some((piece_index, piece_hash)) = missing_pieces.pop_front() {
-        // Find a peer that has the piece, and pop it off the collection.
-        let peer_idx =
-            match find_available_peer_for_piece(&work_peers, &mut available_peers, piece_index) {
-                Ok(peer_idx) => peer_idx,
-                Err(_) => {
-                    missing_pieces.push_back((piece_index, piece_hash));
-                    continue;
-                }
-            };
-        // Don't forget to put it back! We can do it right away!
-        available_peers.push_back(peer_idx);
         let peer = &mut work_peers[peer_idx];
 
         let piece_offset = piece_index * piece_len;
@@ -293,6 +277,8 @@ pub async fn download(
         };
 
         recv_pieces(&config, &piece_params, peer, &mut file).await?;
+
+        peer_idx = (peer_idx + 1) % work_peers.len();
 
         info!(
             "Piece {:2}/{num_pcs} downloaded and stored.",
