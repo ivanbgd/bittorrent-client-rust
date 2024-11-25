@@ -307,7 +307,6 @@ pub async fn download(
                 "Piece {:2}/{num_pcs} downloaded and stored.",
                 piece_index + 1
             );
-            eprintln!("piece {:2}/{num_pcs} downloaded", piece_index + 1); // todo rem
         }
     }
 
@@ -316,7 +315,6 @@ pub async fn download(
     check_file_size(file_len, written_total, output).await?;
 
     info!("Success! Took {:.3?} to complete.", start.elapsed());
-    eprintln!("Success! Took {:.3?} to complete.", start.elapsed()); // todo rem
 
     Ok(())
 }
@@ -432,7 +430,6 @@ async fn send_reqs(
                 "-> Blk req {current_block:4}/{total_num_blocks}, i = {i:4}: peer_idx = {peer_idx:2}; \
                 piece_i = {index:3}, begin = {begin:6}, length = {length:5}"
             );
-            // eprintln!("-> Blk req {current_block:3}/{total_num_blocks}, i = {i:3}: peer_idx = {peer_idx}, piece index = {index}, begin = {begin}, length = {length}"); //todo rem
             peer.feed(msg).await.context("Feed a Request message")?;
 
             if i == current_num_blocks_per_piece - 1 {
@@ -574,14 +571,6 @@ async fn recv_piece(
 
     Ok(written)
 }
-
-// TODO: remove?
-// /// Piece index and data
-// #[derive(Debug)]
-// struct Piece<'a> {
-//     index: usize,
-//     data: &'a [u8],
-// }
 
 #[derive(Debug)]
 struct WorkParams {
