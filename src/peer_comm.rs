@@ -230,7 +230,6 @@ pub async fn download(
     // Download all pieces
     while let Some((piece_index, piece_hash)) = missing_pieces.pop_front() {
         // Find a peer that has the piece, and pop it off the collection.
-        // Don't forget to put it back after it finishes downloading this piece or if the download fails!
         let peer_idx =
             match find_available_peer_for_piece(&work_peers, &mut available_peers, piece_index) {
                 Ok(peer_idx) => peer_idx,
@@ -239,6 +238,8 @@ pub async fn download(
                     continue;
                 }
             };
+        // Don't forget to put it back! We can do it right away!
+        available_peers.push_back(peer_idx);
         let peer = &mut work_peers[peer_idx];
 
         let piece_offset = piece_index * piece_len;
@@ -258,12 +259,13 @@ pub async fn download(
             peer_idx,
         };
 
-        // TODO: Handle errors properly! Repeat the piece somehow in case of an error!
-        // TODO: Namely, put the piece back and put the peer back onto respective queues!
-        fetch_piece(&config, &piece_params, peer, &mut file).await?;
-
-        // Put the peer back into the collection.
-        available_peers.push_back(peer_idx);
+        if fetch_piece(&config, &piece_params, peer, &mut file)
+            .await
+            .is_err()
+        {
+            missing_pieces.push_back((piece_index, piece_hash));
+            continue;
+        }
 
         // file_writer.write_all(&piece.data).await?; // todo rem
 
@@ -276,10 +278,9 @@ pub async fn download(
 
     // file_writer.flush().await?; // todo rem
 
-    info!("Took {:.3?} to complete.", start.elapsed());
     check_file_size(file_len, output).await?;
 
-    info!("Success!");
+    info!("Success! Took {:.3?} to complete.", start.elapsed());
     eprintln!("Success! Took {:.3?} to complete.", start.elapsed()); // todo: comment-out
 
     Ok(())
