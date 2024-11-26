@@ -3,7 +3,6 @@
 //! Error types and helper functions used in the application
 
 use std::array::TryFromSliceError;
-use std::io;
 use std::net::SocketAddrV4;
 use std::num::TryFromIntError;
 
@@ -15,7 +14,7 @@ use crate::message::MessageId;
 #[derive(Debug, Error)]
 pub enum MetaInfoError {
     #[error("I/O error: {0}")]
-    IoError(#[from] io::Error),
+    IoError(#[from] std::io::Error),
 
     #[error("Deserialize error: {0}")]
     DeserializeError(#[from] serde_bencode::Error),
@@ -98,8 +97,8 @@ pub enum MessageCodecError {
     Other(#[from] anyhow::Error),
 }
 
-impl From<io::Error> for MessageCodecError {
-    fn from(value: io::Error) -> Self {
+impl From<std::io::Error> for MessageCodecError {
+    fn from(value: std::io::Error) -> Self {
         MessageCodecError::LengthError(value.to_string())
     }
 }
@@ -157,8 +156,8 @@ pub enum PeerError {
     Other(#[from] anyhow::Error),
 }
 
-impl From<io::Error> for PeerError {
-    fn from(value: io::Error) -> Self {
+impl From<std::io::Error> for PeerError {
+    fn from(value: std::io::Error) -> Self {
         // PeerError::HandshakeError(value.to_string())
         PeerError::Other(anyhow::Error::from(value))
     }
@@ -186,6 +185,29 @@ impl From<PeerError> for String {
     fn from(value: PeerError) -> Self {
         value.to_string()
     }
+}
+
+/// Errors related to working with [`crate::magnet::*`]
+#[derive(Debug, Error, PartialEq)]
+pub enum MagnetError {
+    #[error("parsing magnet link {0}")]
+    MagnetLinkParseError(#[from] MagnetLinkError),
+}
+
+impl From<MagnetError> for String {
+    fn from(value: MagnetError) -> Self {
+        value.to_string()
+    }
+}
+
+/// Errors related to working with [`crate::magnet::MagnetLink`]
+#[derive(Debug, Error, PartialEq)]
+pub enum MagnetLinkError {
+    #[error("\"{0}\" failed as it doesn't start with \"magnet:?\"")]
+    NoMagnet(String),
+
+    #[error("\"{0}\" failed as it doesn't contain the \"xt\" field")]
+    NoXt(String),
 }
 
 /// Converts an error, [`anyhow::Error`], to [`String`].

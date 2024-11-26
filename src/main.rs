@@ -1,10 +1,16 @@
-//! Usage:
-//! - `./your_bittorrent.sh decode <encoded_value>`
-//! - `./your_bittorrent.sh info <path_to_torrent_file>`
-//! - `./your_bittorrent.sh peers <path_to_torrent_file>`
-//! - `./your_bittorrent.sh handshake <path_to_torrent_file> <peer_ip>:<peer_port>`
-//! - `./your_bittorrent.sh download_piece -o <path_to_output_file> <path_to_torrent_file> <piece_index>`
-//! - `./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>`
+//! # A BitTorrent Client
+//!
+//! ## Usage
+//!
+//! ```shell
+//! - ./your_bittorrent.sh decode <encoded_value>
+//! - ./your_bittorrent.sh info <path_to_torrent_file>
+//! - ./your_bittorrent.sh peers <path_to_torrent_file>
+//! - ./your_bittorrent.sh handshake <path_to_torrent_file> <peer_ip>:<peer_port>
+//! - ./your_bittorrent.sh download_piece -o <path_to_output_file> <path_to_torrent_file> <piece_index>
+//! - ./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>
+//! - ./your_bittorrent.sh magnet_parse <magnet-link>
+//! ```
 
 use anyhow::Result;
 use clap::Parser;
@@ -14,6 +20,7 @@ use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::config::get_config;
 use bittorrent_starter_rust::decode::decode_bencoded_value;
 use bittorrent_starter_rust::errors::ae2s;
+use bittorrent_starter_rust::magnet::parse_magnet_link;
 use bittorrent_starter_rust::meta_info::meta_info;
 use bittorrent_starter_rust::peer_comm::{download, download_piece, handshake};
 use bittorrent_starter_rust::tracker::get_peers;
@@ -52,6 +59,11 @@ async fn main() -> Result<(), String> {
         }
         Commands::Download { output, torrent } => {
             download(config, output, torrent).await?;
+        }
+        Commands::MagnetParse { magnet_link } => {
+            let magnet_link = parse_magnet_link(magnet_link)?;
+            let display: String = magnet_link.to_string().split('\n').take(2).collect();
+            println!("{}", display);
         }
     }
 

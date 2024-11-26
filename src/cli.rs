@@ -1,3 +1,5 @@
+//! # The Command-Line Arguments
+
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -64,5 +66,11 @@ pub enum Commands {
 
         /// Path to a torrent file
         torrent: PathBuf,
+    },
+
+    /// Parse magnet link
+    MagnetParse {
+        /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>&x.pe=<peer-address>
+        magnet_link: String,
     },
 }

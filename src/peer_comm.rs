@@ -8,9 +8,11 @@
 //!
 //! https://wiki.theory.org/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
 //!
-//! `$ ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>`
-//!
-//! `Peer ID: 0102030405060708090a0b0c0d0e0f1011121314`
+//! Usage:
+//! ```shell
+//! $ ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>
+//! Peer ID: 0102030405060708090a0b0c0d0e0f1011121314
+//! ```
 //!
 //! Exact value will be different as it is randomly generated.
 //!
