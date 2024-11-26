@@ -43,6 +43,7 @@ Note: This section is for stages 2 and beyond.
     - Peer's IP address and port can be obtained by running the `peers` command and picking any peer from the list.
 - `./your_bittorrent.sh download_piece -o <path_to_output_file> <path_to_torrent_file> <piece_index>`
 - `./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>`
+- `./your_bittorrent.sh magnet_parse "<magnet-link>"`
 
 We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
 

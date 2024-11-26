@@ -42,3 +42,4 @@ futures-util = { version = "0.3.31", features = ["sink"] }
 log = "0.4.20"
 rand = "0.8.5"
 tokio-util = { version = "0.7.12", features = ["full"] }
+urlencoding = "2.1.3"

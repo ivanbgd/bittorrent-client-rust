@@ -28,12 +28,12 @@
 //!
 //! Usage:
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_parse <magnet-link>
+//! $ ./your_bittorrent.sh magnet_parse "<magnet-link>"
 //! ```
 //!
 //! Example:
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_parse magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce
+//! $ ./your_bittorrent.sh magnet_parse "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce"
 //! ```
 //!
 //! Expected response:
@@ -60,11 +60,9 @@ pub fn parse_magnet_link(magnet_link: &str) -> Result<MagnetLink, MagnetError> {
 
 mod magnet_link {
     //! Magnet link
-
-    use std::fmt::{Display, Formatter};
-
     use crate::errors::MagnetLinkError;
     use anyhow::Result;
+    use std::fmt::{Display, Formatter};
 
     /// Magnet link
     #[derive(Debug)]
@@ -90,7 +88,7 @@ mod magnet_link {
             writeln!(f, "Info Hash: {}", self.xt)?;
 
             if let Some(dn) = &self.dn {
-                write!(f, "Display Name: {}", *dn)
+                writeln!(f, "Display Name: {}", *dn)
             } else {
                 write!(f, "")
             }
@@ -123,7 +121,7 @@ mod magnet_link {
                     match param.0 {
                         "xt" => xt = param.1.split_at("urn:btih:".len()).1.to_string(),
                         "dn" => dn = Some(param.1.to_string()),
-                        "tr" => tr = Some(param.1.to_string()),
+                        "tr" => tr = Some(url_decode(param.1)?),
                         _ => {}
                     }
                 }
@@ -131,6 +129,10 @@ mod magnet_link {
 
             Ok(Self { xt, dn, tr })
         }
+    }
+
+    fn url_decode(url: &str) -> Result<String, MagnetLinkError> {
+        Ok(urlencoding::decode(url)?.into_owned())
     }
 }
 
@@ -173,11 +175,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_magnet_link_tr_xt() {
-        let example = "magnet:?tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce&xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165";
+    fn parse_magnet_link_dn_xt() {
+        let example = "magnet:?dn=magnet1.gif&xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165";
         assert_eq!(
-            "Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce\n\
-            Info Hash: ad42ce8109f54c99613ce38f9b4d87e70f24a165\n",
+            "Info Hash: ad42ce8109f54c99613ce38f9b4d87e70f24a165\n\
+            Display Name: magnet1.gif\n",
             format!("{}", parse_magnet_link(example).unwrap())
         );
     }

@@ -9,7 +9,7 @@
 //! - ./your_bittorrent.sh handshake <path_to_torrent_file> <peer_ip>:<peer_port>
 //! - ./your_bittorrent.sh download_piece -o <path_to_output_file> <path_to_torrent_file> <piece_index>
 //! - ./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>
-//! - ./your_bittorrent.sh magnet_parse <magnet-link>
+//! - ./your_bittorrent.sh magnet_parse "<magnet-link>"
 //! ```
 
 use anyhow::Result;
@@ -61,8 +61,8 @@ async fn main() -> Result<(), String> {
             download(config, output, torrent).await?;
         }
         Commands::MagnetParse { magnet_link } => {
-            let magnet_link = parse_magnet_link(magnet_link)?;
-            let display: String = magnet_link.to_string().split('\n').take(2).collect();
+            let magnet_link = parse_magnet_link(magnet_link)?.to_string();
+            let display: String = magnet_link.split_inclusive('\n').take(2).collect();
             println!("{}", display);
         }
     }

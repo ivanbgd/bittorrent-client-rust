@@ -50,11 +50,11 @@ use crate::tracker::peers::Peers;
 pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
     let meta = meta_info(torrent)?;
     let tracker = meta.announce;
-    let info_hash_hex = &meta.info.info_hash_hex;
 
     // The 20 byte sha1 hash of the bencoded form of the info value from the metainfo file.
     // This value will almost certainly have to be escaped.
-    let info_hash = url_encode(info_hash_hex);
+    let info_hash = &meta.info.info_hash;
+    let info_hash = url_encode(info_hash);
 
     // Currently, only the single-file torrents are supported.
     let left = meta.info.length();
@@ -82,7 +82,14 @@ pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
 /// https://en.wikipedia.org/wiki/Percent-encoding
 ///
 /// https://en.wikipedia.org/wiki/Percent-encoding#Types_of_URI_characters
-fn url_encode(s: &str) -> String {
+fn url_encode(s: &[u8]) -> String {
+    urlencoding::encode_binary(s).into_owned()
+}
+
+/// https://en.wikipedia.org/wiki/Percent-encoding
+///
+/// https://en.wikipedia.org/wiki/Percent-encoding#Types_of_URI_characters
+fn _url_encode(s: &str) -> String {
     let info = s.as_bytes();
     let mut res: String = String::with_capacity(2 * SHA1_LEN + SHA1_LEN);
     let mut i: usize = 0;

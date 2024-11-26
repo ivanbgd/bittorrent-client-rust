@@ -5,7 +5,7 @@
 use std::array::TryFromSliceError;
 use std::net::SocketAddrV4;
 use std::num::TryFromIntError;
-
+use std::string::FromUtf8Error;
 use thiserror::Error;
 
 use crate::message::MessageId;
@@ -190,7 +190,7 @@ impl From<PeerError> for String {
 /// Errors related to working with [`crate::magnet::*`]
 #[derive(Debug, Error, PartialEq)]
 pub enum MagnetError {
-    #[error("parsing magnet link {0}")]
+    #[error("Parsing magnet link {0}.")]
     MagnetLinkParseError(#[from] MagnetLinkError),
 }
 
@@ -201,13 +201,25 @@ impl From<MagnetError> for String {
 }
 
 /// Errors related to working with [`crate::magnet::MagnetLink`]
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error)]
 pub enum MagnetLinkError {
-    #[error("\"{0}\" failed as it doesn't start with \"magnet:?\"")]
+    #[error("'{0}' failed as it doesn't start with 'magnet:?'")]
     NoMagnet(String),
 
-    #[error("\"{0}\" failed as it doesn't contain the \"xt\" field")]
+    #[error("'{0}' failed as it doesn't contain the 'xt' field")]
     NoXt(String),
+
+    #[error(transparent)]
+    UrlDecode(#[from] FromUtf8Error),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl PartialEq for MagnetLinkError {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_string() == other.to_string()
+    }
 }
 
 /// Converts an error, [`anyhow::Error`], to [`String`].
