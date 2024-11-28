@@ -47,19 +47,22 @@ use crate::tracker::peers::Peers;
 /// - [`serde_bencode::Error`]
 ///
 /// All error types are wrapped in [`TrackerError`].
-pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
+pub async fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
     let meta = meta_info(torrent)?;
     let tracker = meta.announce;
 
     // The 20 byte sha1 hash of the bencoded form of the info value from the metainfo file.
     // This value will almost certainly have to be escaped.
+    // Plain byte representation of the SHA1 sum of the Info dictionary, 20 bytes long.
     let info_hash = &meta.info.info_hash;
+
+    // Hexadecimal string representation of the SHA1 sum of the Info dictionary, 40 bytes long.
     let info_hash = url_encode(info_hash);
 
     // Currently, only the single-file torrents are supported.
     let left = meta.info.length();
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
 
     let req = format!("{}/?info_hash={info_hash}", &tracker);
 
@@ -72,7 +75,7 @@ pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
         compact: COMPACT,
     };
 
-    let resp = client.get(&req).query(&query).send()?.bytes()?;
+    let resp = client.get(&req).query(&query).send().await?.bytes().await?;
     let resp = Vec::from(resp);
     let response: TrackerResponse = serde_bencode::from_bytes(&resp)?;
 
@@ -82,7 +85,7 @@ pub fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
 /// https://en.wikipedia.org/wiki/Percent-encoding
 ///
 /// https://en.wikipedia.org/wiki/Percent-encoding#Types_of_URI_characters
-fn url_encode(s: &[u8]) -> String {
+pub(crate) fn url_encode(s: &[u8]) -> String {
     urlencoding::encode_binary(s).into_owned()
 }
 
@@ -108,25 +111,25 @@ fn _url_encode(s: &str) -> String {
 ///
 /// *Note:* `info_hash` is deliberately omitted, because it isn't handled properly in the `reqwest::send()` function.
 #[derive(Debug, Serialize)]
-struct TrackerRequest {
+pub(crate) struct TrackerRequest {
     /// A string of length 20 which this downloader uses as its id. Each downloader generates its own id at random
     /// at the start of a new download. This value will also almost certainly have to be escaped.
-    peer_id: String,
+    pub(crate) peer_id: String,
 
     /// The port number this peer is listening on. Common behavior is for a downloader to try to listen on port 6881
     /// and if that port is taken try 6882, then 6883, etc. and give up after 6889.
-    port: u16,
+    pub(crate) port: u16,
 
     /// The total amount uploaded so far, encoded in base ten ascii.
-    uploaded: usize,
+    pub(crate) uploaded: usize,
 
     /// The total amount downloaded so far, encoded in base ten ascii.
-    downloaded: usize,
+    pub(crate) downloaded: usize,
 
     /// The number of bytes this peer still has to download, encoded in base ten ascii.
     /// Note that this can't be computed from downloaded and the file length since it might be a resume,
     /// and there's a chance that some of the downloaded data failed an integrity check and had to be re-downloaded.
-    left: usize,
+    pub(crate) left: usize,
 
     /// Setting this to 1 indicates that the client accepts a compact response.
     /// The peers list is replaced by a peers string with 6 bytes per peer.
@@ -135,7 +138,7 @@ struct TrackerRequest {
     /// It should be noted that some trackers only support compact responses (for saving bandwidth)
     /// and either refuse requests without "compact=1" or simply send a compact response unless the request
     /// contains "compact=0" (in which case they will refuse the request.)
-    compact: u8,
+    pub(crate) compact: u8,
 }
 
 /// The tracker responds with "text/plain" document consisting of a bencoded dictionary with the following keys:
@@ -160,7 +163,7 @@ pub struct TrackerResponse {
     pub peers: Peers,
 }
 
-mod peers {
+pub mod peers {
     //! A compact representation of the peer list
 
     use std::fmt::{Display, Formatter};
@@ -259,9 +262,9 @@ mod tests {
     use super::*;
 
     #[ignore = "changes over time"]
-    #[test]
-    fn get_peers_sample_torrent() {
-        let peers = get_peers(&PathBuf::from("sample.torrent")).unwrap();
+    #[tokio::test]
+    async fn get_peers_sample_torrent() {
+        let peers = get_peers(&PathBuf::from("sample.torrent")).await.unwrap();
         let mut res = String::with_capacity(PEER_DISPLAY_LEN * peers.0 .0.len());
         for peer in &peers.0 .0 {
             res += &peer.to_string();

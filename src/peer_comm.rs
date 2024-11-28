@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::config::Config;
-use crate::constants::{BLOCK_SIZE, MAX_PIECE_SIZE, SHA1_LEN};
+use crate::constants::{HashType, BLOCK_SIZE, MAX_PIECE_SIZE};
 use crate::errors::PeerError;
 use crate::message::{Message, MessageId, PiecePayload, RequestPayload};
 use crate::meta_info::Info;
@@ -61,7 +61,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 ///
 /// Arguments:
 /// - peer: &[`SocketAddrV4`], peer's socket address, <peer_ip>:<peer_port> (example: 127.0.0.1:8080)
-/// - info_hash: &[u8; SHA1_LEN], can be obtained and calculated from a torrent file
+/// - info_hash: &[`HashType`], can be obtained and calculated from a torrent file
 ///
 /// Returns [`Peer`] which holds a 20 bytes long SHA1 representation of the peer ID received during the handshake.
 ///
@@ -77,7 +77,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// `Peer ID: 0102030405060708090a0b0c0d0e0f1011121314`
 ///
 /// Exact value will be different as it is randomly generated.
-pub async fn handshake(peer: &SocketAddrV4, info_hash: &[u8; SHA1_LEN]) -> Result<Peer, PeerError> {
+pub async fn handshake(peer: &SocketAddrV4, info_hash: &HashType) -> Result<Peer, PeerError> {
     let mut peer = Peer::new(peer);
     peer.handshake(info_hash).await?;
 
@@ -113,7 +113,7 @@ pub async fn download_piece(
     torrent: &PathBuf,
     piece_index: usize,
 ) -> Result<(), PeerError> {
-    let work_params = get_work_params(torrent, Some(piece_index))?;
+    let work_params = get_work_params(torrent, Some(piece_index)).await?;
 
     let WorkParams {
         mut peers,
@@ -195,7 +195,7 @@ pub async fn download(
 ) -> Result<(), PeerError> {
     let start = Instant::now();
 
-    let work_params = get_work_params(torrent, None)?;
+    let work_params = get_work_params(torrent, None).await?;
     let WorkParams {
         mut peers,
         info,
@@ -259,9 +259,10 @@ pub async fn download(
                 peer_idx,
             };
 
-            if send_reqs(&config, &piece_params, peer).await.is_err() {
+            if let Err(err) = send_reqs(&config, &piece_params, peer).await {
                 missing_pieces.pop_front();
                 missing_pieces.push_back((piece_index, piece_hash));
+                warn!("Error sending a request for a piece: {err}");
                 continue;
             }
 
@@ -296,11 +297,13 @@ pub async fn download(
                 peer_idx,
             };
 
-            if let Ok(written) = recv_piece(&config, &piece_params, peer, &mut file).await {
-                written_total += written;
-            } else {
-                missing_pieces.push_back((piece_index, piece_hash));
-                continue;
+            match recv_piece(&config, &piece_params, peer, &mut file).await {
+                Ok(written) => written_total += written,
+                Err(err) => {
+                    missing_pieces.push_back((piece_index, piece_hash));
+                    warn!("Error receiving a piece: {err}");
+                    continue;
+                }
             }
 
             piece_to_peer.remove(&piece_index);
@@ -333,7 +336,7 @@ struct PieceParams<'a> {
     last_block_len: usize,
     total_num_blocks: usize,
     piece_index: usize,
-    piece_hash: &'a [u8; SHA1_LEN],
+    piece_hash: &'a HashType,
     piece_offset: usize,
     /// Here, `peer_idx` is used only for logging.
     peer_idx: usize,
@@ -591,9 +594,12 @@ struct WorkParams {
 ///
 /// # Errors
 /// - [`crate::errors::TrackerError`], in case it can't get the list of peers.
-fn get_work_params(torrent: &PathBuf, piece_index: Option<usize>) -> Result<WorkParams, PeerError> {
-    // Perform the tracker GET request to get a list of peers
-    let (peers, info) = get_peers(torrent)?;
+async fn get_work_params(
+    torrent: &PathBuf,
+    piece_index: Option<usize>,
+) -> Result<WorkParams, PeerError> {
+    // Perform the tracker GET request to get a list of peers.
+    let (peers, info) = get_peers(torrent).await?;
     let peers = peers.0;
 
     // The file to download is split into pieces of same fixed length,
@@ -777,7 +783,7 @@ async fn calc_file_hash(path: &PathBuf) -> Result<String, PeerError> {
     let mut file = File::open(path).await?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).await?;
-    let hash: [u8; SHA1_LEN] = *Sha1::digest(buffer).as_ref();
+    let hash: HashType = *Sha1::digest(buffer).as_ref();
     let hash = hex::encode(hash);
     Ok(hash)
 }

@@ -44,11 +44,18 @@ Note: This section is for stages 2 and beyond.
 - `./your_bittorrent.sh download_piece -o <path_to_output_file> <path_to_torrent_file> <piece_index>`
 - `./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>`
 - `./your_bittorrent.sh magnet_parse "<magnet-link>"`
+- `./your_bittorrent.sh magnet_handshake "<magnet-link>"`
 
 We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
 
-To enable the provided logging facility, first set the logging level by executing
-`RUST_LOG=trace` or `RUST_LOG=debug` or `RUST_LOG=info`, for example.
+To enable the provided logging facility, first set the logging level by setting the `RUST_LOG` environment variable.  
+To set it for the entire terminal session, execute `export RUST_LOG=debug`, for example, first.  
+Or, prepend the run command with a desired log level; for example:  
+`RUST_LOG=debug ./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>`  
+Choose between:  
+`RUST_LOG=[trace | debug | info | warn]`  
+*Note*: Logging is fully enabled only for the `download_piece` and `download` commands. Some commands
+don't have any log output.
 
 Sample torrent files are provided in the root of the repository,
 as well as in the [test_samples](./test_samples) subdirectory.

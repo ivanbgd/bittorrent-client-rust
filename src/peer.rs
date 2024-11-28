@@ -34,7 +34,7 @@ pub struct Peer {
     pub stream: Option<Framed<TcpStream, MessageCodec>>,
 
     /// A 20 bytes long SHA1 representation of the peer ID received during the handshake
-    peer_id: Option<[u8; SHA1_LEN]>,
+    peer_id: Option<HashType>,
 
     /// Represents the pieces that the peer has; received in a Bitfield message
     pub bitfield: Option<Vec<u8>>,
@@ -53,18 +53,23 @@ impl Peer {
 
     /// Sends a handshake to a peer, and receives a handshake from the peer, in the same format.
     ///
-    /// `info_hash` can be obtained and calculated from a torrent file.
+    /// `info_hash` can be obtained and calculated from a torrent file or from a magnet link.
     ///
     /// The handshake is a required message and must be the first message transmitted by the client.
+    ///
+    /// During handshake, we announce extension support.
     ///
     /// Tries to connect to the peer; sets the `stream` field if it succeeds.
     ///
     /// Also sets the 20 bytes long SHA1 representation of the `peer_id` received during a successful handshake.
-    pub(crate) async fn handshake(&mut self, info_hash: &[u8; SHA1_LEN]) -> Result<(), PeerError> {
+    pub(crate) async fn handshake(&mut self, info_hash: &HashType) -> Result<(), PeerError> {
+        let mut reserved = HANDSHAKE_RESERVED;
+        reserved[5] |= EXTENSION_SUPPORT_BIT;
+
         let mut buf = [0u8; HANDSHAKE_MSG_LEN];
         buf[0] = BT_PROTO_LEN as u8;
         buf[BT_PROTOCOL_RANGE].copy_from_slice(BT_PROTOCOL.as_bytes());
-        buf[HANDSHAKE_RESERVED_RANGE].copy_from_slice(&HANDSHAKE_RESERVED);
+        buf[HANDSHAKE_RESERVED_RANGE].copy_from_slice(&reserved);
         buf[INFO_HASH_RANGE].copy_from_slice(info_hash);
         buf[PEER_ID_RANGE].copy_from_slice(PEER_ID.as_bytes());
 
@@ -86,7 +91,7 @@ impl Peer {
             && (&buf[INFO_HASH_RANGE] == info_hash)
         {
             let peer_id = &buf[PEER_ID_RANGE];
-            self.peer_id = Some(<[u8; SHA1_LEN]>::try_from(peer_id)?);
+            self.peer_id = Some(<HashType>::try_from(peer_id)?);
         } else {
             return Err(PeerError::HandshakeError(format!(
                 "Received handshake parameters from peer {} don't match the sent parameters.",

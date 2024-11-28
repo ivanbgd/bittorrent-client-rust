@@ -32,7 +32,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-use crate::constants::SHA1_LEN;
+use crate::constants::{HashType, SHA1_LEN};
 use crate::errors::MetaInfoError;
 use crate::pieces::Pieces;
 
@@ -87,9 +87,9 @@ impl MetaInfo {
     ///
     /// # Errors
     /// Serialization errors.
-    fn info_hash(&self) -> Result<[u8; SHA1_LEN]> {
+    fn info_hash(&self) -> Result<HashType> {
         let b_encoded_serialized = serde_bencode::to_bytes(&self.info)?;
-        let hash: [u8; SHA1_LEN] = *Sha1::digest(b_encoded_serialized).as_ref();
+        let hash: HashType = *Sha1::digest(b_encoded_serialized).as_ref();
         assert_eq!(hash.len(), SHA1_LEN);
         Ok(hash)
     }
@@ -174,7 +174,7 @@ pub struct Info {
     ///
     /// This field is not a part of BitTorrent Specification, but we added it for easier use.
     #[serde(skip)]
-    pub info_hash: [u8; SHA1_LEN],
+    pub info_hash: HashType,
 
     /// Hexadecimal string representation of the SHA1 sum of the Info dictionary, 40 bytes long
     ///

@@ -70,7 +70,13 @@ pub enum Commands {
 
     /// Parse magnet link
     MagnetParse {
-        /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>&x.pe=<peer-address>
+        /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>
+        magnet_link: String,
+    },
+
+    /// Extension handshake
+    MagnetHandshake {
+        /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>
         magnet_link: String,
     },
 }

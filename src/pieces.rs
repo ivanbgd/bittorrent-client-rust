@@ -7,7 +7,7 @@ use std::fmt;
 use serde::de::{Deserialize, Deserializer, Error, Visitor};
 use serde::ser::{Serialize, Serializer};
 
-use crate::constants::SHA1_LEN;
+use crate::constants::{HashType, SHA1_LEN};
 
 /// Byte string consisting of the concatenation of all 20-byte SHA1 hash values,
 /// one per piece (byte string, i.e., not urlencoded)
@@ -17,7 +17,7 @@ use crate::constants::SHA1_LEN;
 ///
 /// Implemented as vector of 20-byte arrays.
 #[derive(Debug, Clone)]
-pub struct Pieces(pub Vec<[u8; SHA1_LEN]>);
+pub struct Pieces(pub Vec<HashType>);
 
 struct PiecesVisitor;
 

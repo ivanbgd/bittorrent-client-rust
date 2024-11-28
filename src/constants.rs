@@ -9,6 +9,9 @@ pub const CONFIG_FILE_PATH: &str = "config.json";
 /// Length of the used hash sum, which is the [`sha1::Sha1`] sum, and its length is always 20
 pub const SHA1_LEN: usize = 20;
 
+/// The type of hash sum used in the application: `[u8; 20]`, for the SHA-1 hash sum
+pub type HashType = [u8; SHA1_LEN];
+
 /// Our own Peer ID, 20 bytes long
 ///
 /// https://wiki.theory.org/BitTorrentSpecification#peer_id
@@ -35,6 +38,8 @@ pub const BT_PROTOCOL: &str = "BitTorrent protocol";
 pub const BT_PROTO_LEN: usize = BT_PROTOCOL.len();
 /// Handshake reserved, eight zero bytes
 pub const HANDSHAKE_RESERVED: [u8; 8] = [0; 8];
+/// Indicate that our client supports extensions; 20th bit from the right, counting starts at 0
+pub const EXTENSION_SUPPORT_BIT: u8 = 1 << 4;
 /// Handshake message length, 68
 pub const HANDSHAKE_MSG_LEN: usize = 68;
 
