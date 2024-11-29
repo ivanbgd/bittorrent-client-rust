@@ -152,7 +152,9 @@ fn add_interval(resp: Bytes) -> Vec<u8> {
     let resp_str = String::from_utf8_lossy(&resp_clone);
     let mut resp_vec = Vec::from(resp);
     if !resp_str.contains("8:interval") {
+        // Remove the last 'e' that was ending the entire dictionary.
         let _removed = resp_vec.remove(resp_vec.len() - 1);
+        // Also add back the last 'e' to end the entire dictionary.
         resp_vec.put_slice(b"8:intervali60ee");
     }
     resp_vec
