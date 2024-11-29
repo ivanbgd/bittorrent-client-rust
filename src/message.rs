@@ -20,12 +20,12 @@
 
 use std::fmt::{Display, Formatter};
 
+use crate::bencode::bencode_value;
+use crate::constants::MAX_FRAME_SIZE;
+use crate::errors::{MessageCodecError, MessageError, MessageIdError, PiecePayloadError};
 use anyhow::{Context, Result};
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
-
-use crate::constants::MAX_FRAME_SIZE;
-use crate::errors::{MessageCodecError, MessageError, MessageIdError, PiecePayloadError};
 
 /// Message types
 ///
@@ -111,6 +111,19 @@ pub enum MessageId {
     /// This peer should be inserted in the local routing table (if DHT tracker is supported).
     Port = 9,
 
+    /// Extended messages follow the standard BitTorrent message format:
+    /// - message length prefix (4 bytes),
+    /// - message id (1 byte) - this will be `20` for all messages implemented by extensions,
+    /// - payload (variable size).
+    ///
+    /// The Extended message payload is structured as follows:
+    /// - Extended message id (1 byte):
+    ///     - This will be 0 for the extended handshake.
+    /// - Bencoded dictionary (variable size):
+    ///     - This will contain a key "m" with another dictionary as its value.
+    ///     - The inner dictionary maps supported extension names to their corresponding message IDs.
+    Extended = 20,
+
     /// Unsupported message ID
     Unsupported,
 }
@@ -142,6 +155,7 @@ impl TryFrom<u8> for MessageId {
             7 => Ok(MessageId::Piece),
             8 => Ok(MessageId::Cancel),
             9 => Ok(MessageId::Port),
+            20 => Ok(MessageId::Extended),
             v => Err(MessageIdError::UnsupportedId(v)),
         }
     }
@@ -188,10 +202,10 @@ impl Display for Message {
 /// Converts a [`Message`] into a byte stream.
 impl From<Message> for Vec<u8> {
     /// Serializes a [`Message`] for a send transfer over the wire.
-    fn from(val: Message) -> Vec<u8> {
-        let len = u32::to_be_bytes(val.len);
-        let id = val.id.into();
-        let payload = val.payload.unwrap_or_default();
+    fn from(value: Message) -> Vec<u8> {
+        let len = u32::to_be_bytes(value.len);
+        let id = value.id.into();
+        let payload = value.payload.unwrap_or_default();
         let payload_len = payload.len();
 
         let mut buf = Vec::with_capacity(4 + 1 + payload_len);
@@ -431,4 +445,93 @@ impl Encoder<Message> for MessageCodec {
 
         Ok(())
     }
+}
+
+/// See: https://www.bittorrent.org/beps/bep_0010.html
+#[derive(Debug, PartialEq)]
+pub enum ExtendedMessageId {
+    /// Extension handshake message
+    Handshake = 0,
+
+    /// Unsupported message ID
+    Unsupported,
+}
+
+impl Display for ExtendedMessageId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self as *const Self as u8)
+    }
+}
+
+impl From<ExtendedMessageId> for u8 {
+    fn from(value: ExtendedMessageId) -> u8 {
+        value as u8
+    }
+}
+
+impl TryFrom<u8> for ExtendedMessageId {
+    type Error = MessageIdError;
+
+    fn try_from(value: u8) -> Result<ExtendedMessageId, MessageIdError> {
+        match value {
+            0 => Ok(ExtendedMessageId::Handshake),
+            v => Err(MessageIdError::UnsupportedId(v)),
+        }
+    }
+}
+
+/// The Extended message payload is structured as follows:
+/// - Extended message id (1 byte):
+///     - This will be 0 for the extended handshake.
+/// - Bencoded dictionary (variable size):
+///     - This will contain a key "m" with another dictionary as its value.
+///     - The inner dictionary maps supported extension names to their corresponding message IDs.
+///
+/// See: https://www.bittorrent.org/beps/bep_0010.html
+#[derive(Debug)]
+pub struct ExtendedMessagePayload {
+    id: ExtendedMessageId,
+    dict: Vec<u8>,
+}
+
+impl ExtendedMessagePayload {
+    pub fn new(id: ExtendedMessageId, dict: serde_json::Value) -> Result<Self, anyhow::Error> {
+        let dict = bencode_value(dict)?;
+
+        Ok(Self { id, dict })
+    }
+}
+
+/// Converts a [`ExtendedMessagePayload`] into a byte stream.
+impl From<ExtendedMessagePayload> for Vec<u8> {
+    /// Serializes a [`ExtendedMessagePayload`] for a send transfer over the wire.
+    fn from(value: ExtendedMessagePayload) -> Self {
+        let id: u8 = value.id.into();
+        let dict = value.dict;
+
+        let mut buf = Vec::with_capacity(1 + dict.len());
+
+        buf.push(id);
+        buf.extend(dict);
+
+        buf
+    }
+}
+
+// todo rem
+// #[derive(Debug)]
+// pub struct ExtendedMessageHandshakeDict {
+//
+// }
+
+// todo: needed?
+/// See: https://www.bittorrent.org/beps/bep_0009.html
+#[derive(Debug, PartialEq)]
+pub enum ExtensionMessageId {
+    Request = 0,
+    Data = 1,
+    Reject = 2,
+
+    /// Unsupported message ID
+    Unsupported,
 }

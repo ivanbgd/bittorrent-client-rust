@@ -11,6 +11,7 @@ use crate::message::{Message, MessageCodec};
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use log::trace;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -21,7 +22,7 @@ use tokio_util::codec::Framed;
 ///
 /// Created through [`Peer::new`] by passing it the peer's socket address.
 ///
-/// Initialized through a call to [`Peer::handshake`].
+/// Initialized through a call to [`Peer::base_handshake`].
 ///
 /// [`Peer`] implements [`Display`] so it can be printed as the 40 characters long hexadecimal
 /// representation of the peer ID received during the handshake.
@@ -53,6 +54,10 @@ impl Peer {
 
     /// Sends a handshake to a peer, and receives a handshake from the peer, in the same format.
     ///
+    /// This is a base-handshake, i.e., without extensions.
+    ///
+    /// Our client supports extensions, so we set the relevant reserved bit in this function.
+    ///
     /// `info_hash` can be obtained and calculated from a torrent file or from a magnet link.
     ///
     /// The handshake is a required message and must be the first message transmitted by the client.
@@ -62,7 +67,10 @@ impl Peer {
     /// Tries to connect to the peer; sets the `stream` field if it succeeds.
     ///
     /// Also sets the 20 bytes long SHA1 representation of the `peer_id` received during a successful handshake.
-    pub(crate) async fn handshake(&mut self, info_hash: &HashType) -> Result<(), PeerError> {
+    ///
+    /// # Returns
+    /// Whether the peer supports extensions.
+    pub(crate) async fn base_handshake(&mut self, info_hash: &HashType) -> Result<bool, PeerError> {
         let mut reserved = HANDSHAKE_RESERVED;
         reserved[5] |= EXTENSION_SUPPORT_BIT;
 
@@ -99,11 +107,17 @@ impl Peer {
             )));
         }
 
+        let mut supports_ext = false;
+        if buf[HANDSHAKE_RESERVED_RANGE][5] & EXTENSION_SUPPORT_BIT != 0 {
+            supports_ext = true;
+        }
+        trace!("Peer {} supports_ext = {supports_ext}", self.addr);
+
         let stream = Framed::new(stream, MessageCodec);
 
         self.stream = Some(stream);
 
-        Ok(())
+        Ok(supports_ext)
     }
 
     /// Flush the sink, processing all pending messages.

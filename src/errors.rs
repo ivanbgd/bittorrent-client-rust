@@ -214,6 +214,9 @@ pub enum MagnetError {
     #[error("Parsing magnet link {0}.")]
     MagnetLinkParseError(#[from] MagnetLinkError),
 
+    #[error("No peers could be found.")]
+    NoPeersFound,
+
     #[error(transparent)]
     HexError(#[from] hex::FromHexError),
 

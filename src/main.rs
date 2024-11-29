@@ -17,9 +17,9 @@ use anyhow::Result;
 use clap::Parser;
 use log::info;
 
+use bittorrent_starter_rust::bencode::decode_bencoded_value;
 use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::config::get_config;
-use bittorrent_starter_rust::decode::decode_bencoded_value;
 use bittorrent_starter_rust::errors::ae2s;
 use bittorrent_starter_rust::magnet::{magnet_handshake, parse_magnet_link};
 use bittorrent_starter_rust::meta_info::meta_info;

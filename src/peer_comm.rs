@@ -59,6 +59,8 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 /// Sends a handshake to a single peer, and receives a handshake from the peer, in the same format.
 ///
+/// This is a base-handshake, i.e., without extensions.
+///
 /// Arguments:
 /// - peer: &[`SocketAddrV4`], peer's socket address, <peer_ip>:<peer_port> (example: 127.0.0.1:8080)
 /// - info_hash: &[`HashType`], can be obtained and calculated from a torrent file
@@ -79,7 +81,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// Exact value will be different as it is randomly generated.
 pub async fn handshake(peer: &SocketAddrV4, info_hash: &HashType) -> Result<Peer, PeerError> {
     let mut peer = Peer::new(peer);
-    peer.handshake(info_hash).await?;
+    peer.base_handshake(info_hash).await?;
 
     Ok(peer)
 }
@@ -683,10 +685,14 @@ async fn local_get_peers(
     // Exchange messages with each peer: receive Bitfield, send Interested, receive Unchoke.
     //
     // Implementation notes:
-    // - The selection of peers could be randomized, but it isn't required; rather, this is just an idea.
+    // - We are choosing a peer to download a piece from randomly in `download_piece()`, and we cycle
+    //   between peers in `download()`, which downloads entire file.
+    //   - That's why we don't have to randomize the selection of peers here (which isn't required anyway).
+    //   - Rather, we try to handshake with a limited number of peers here, and later we decide from which
+    //     one to download which piece.
     // - Don't store peer_idx inside Peer, at least not as-is, because we could skip adding a peer in this loop.
     for (peer_idx, peer) in peers.iter_mut().enumerate().take(peers_len) {
-        // Establish a TCP connection with a peer, and perform a handshake
+        // Establish a TCP connection with a peer, and perform a base handshake
         let mut peer = match handshake(peer, &info.info_hash).await {
             Ok(peer) => peer,
             Err(err) => {
@@ -695,6 +701,15 @@ async fn local_get_peers(
             }
         };
         trace!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
+
+        // Send a Bitfield message
+        // This can be safely ignored in this challenge, but we're doing it anyway.
+        // We are setting the Bitfield payload to all zeros, which means that we don't have any piece.
+        // In reality, we'd set it to show which pieces we have.
+        let payload: Vec<u8> = vec![0; info.pieces.0.len().div_ceil(8)];
+        let msg = Message::new(MessageId::Bitfield, Some(payload));
+        peer.feed(msg).await.context("Feed the Bitfield message")?;
+        peer.flush().await.context("Flush the Bitfield message")?;
 
         // Receive a Bitfield message
         // This message is optional, and need not be sent if a peer has no pieces.

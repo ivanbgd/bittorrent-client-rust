@@ -1,9 +1,9 @@
 //! # A BitTorrent Client Library
 
+pub mod bencode;
 pub mod cli;
 pub mod config;
 pub mod constants;
-pub mod decode;
 pub mod errors;
 pub mod magnet;
 pub mod message;

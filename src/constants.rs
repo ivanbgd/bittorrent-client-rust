@@ -75,3 +75,6 @@ pub const MAX_PIPELINED_REQUESTS: usize = 32;
 
 /// Maximal message frame size in bytes, 64 kB
 pub const MAX_FRAME_SIZE: usize = 1 << 16;
+
+/// The "ut_metadata" ID for the extension handshake message
+pub const UT_METADATA: u8 = 1;

@@ -68,13 +68,20 @@
 //! - Peer 2: `165.232.35.139:51459`
 //! - Peer 3: `139.59.184.255:51548`
 
-use crate::constants::{HashType, COMPACT, DOWNLOADED, PEER_ID, PORT, SHA1_LEN, UPLOADED};
-use crate::errors::MagnetError;
+use crate::constants::{
+    HashType, COMPACT, DOWNLOADED, PEER_ID, PORT, SHA1_LEN, UPLOADED, UT_METADATA,
+};
+use crate::errors::{MagnetError, PeerError};
 use crate::magnet::magnet_link::MagnetLink;
+use crate::message::{ExtendedMessageId, ExtendedMessagePayload, Message, MessageId};
 use crate::peer::Peer;
 use crate::tracker::peers::Peers;
 use crate::tracker::{TrackerRequest, TrackerResponse};
-use anyhow::Result;
+use anyhow::{Context, Result};
+use log::warn;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
+use std::collections::HashMap;
 
 /// Parses a given magnet link.
 ///
@@ -103,10 +110,59 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     // Perform the tracker GET request to get a list of peers.
     let peers = get_peers(magnet_link.tr.as_deref(), urlenc_info_hash).await?;
 
-    // Choose a peer.
-    let mut peer = Peer::new(&peers.0[0]);
-    // Establish a TCP connection with a peer, and perform a handshake.
-    peer.handshake(&buf).await?;
+    // Choose a peer randomly.
+    let mut list = peers.0;
+    list.shuffle(&mut thread_rng());
+    let mut peer = Peer::new(&list[0]);
+
+    // Establish a TCP connection with a peer, and perform a base handshake
+    let supports_ext = match peer.base_handshake(&buf).await {
+        Ok(v) => v,
+        Err(err) => {
+            warn!("Magnet handshake error: {err:#}");
+            return Err(MagnetError::from(err));
+        }
+    };
+
+    // Receive a Bitfield message
+    let msg = match peer.recv_msg().await {
+        Ok(msg) => msg,
+        Err(err) => {
+            warn!("Receive a Bitfield message: {err:#}");
+            return Err(err.into());
+        }
+    };
+    if msg.id != MessageId::Bitfield {
+        let err = PeerError::from((msg.id, MessageId::Bitfield));
+        warn!("Receive a Bitfield message: {err:#}");
+        return Err(err.into());
+    }
+    peer.bitfield = Some(
+        msg.payload
+            .clone()
+            .expect("Expected to have received a Bitfield message"),
+    );
+
+    // If the peer supports extensions (based on the reserved bit in the base handshake):
+    if supports_ext {
+        // Send the extension handshake message
+        let ext_hs = HashMap::from([("m", HashMap::from([("ut_metadata", UT_METADATA)]))]);
+        let dict = serde_json::to_value(&ext_hs)
+            .unwrap_or_else(|_| panic!("Couldn't convert {ext_hs:?} to `serde_json::Value`."));
+        let payload = ExtendedMessagePayload::new(ExtendedMessageId::Handshake, dict)?;
+        let msg = Message::new(MessageId::Extended, Some(payload.into()));
+        peer.feed(msg)
+            .await
+            .context("Feed the extension handshake message")?;
+        peer.flush()
+            .await
+            .context("Flush the extension handshake message")?;
+
+        // Receive the extension handshake message
+    }
+    // Note that the extension handshake message is only sent if the other peer supports extensions
+    // (indicated by the reserved bit in the base handshake).
+    // This is how backward compatibility is maintained with peers that don't support extensions.
 
     Ok(peer)
 }
@@ -139,6 +195,10 @@ async fn get_peers(tracker: Option<&str>, info_hash: String) -> Result<Peers, Ma
     let resp = client.get(&req).query(&query).send().await?.bytes().await?;
     let resp = Vec::from(resp);
     let response: TrackerResponse = serde_bencode::from_bytes(&resp)?;
+
+    if response.peers.0.is_empty() {
+        return Err(MagnetError::NoPeersFound);
+    }
 
     Ok(response.peers)
 }
