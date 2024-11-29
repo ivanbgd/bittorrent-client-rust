@@ -153,10 +153,12 @@ pub(crate) struct TrackerRequest {
 /// between regular re-requests, and `peers`. `peers` is a compact representation of the peer list.
 #[derive(Debug, Deserialize)]
 pub struct TrackerResponse {
-    /// Interval in seconds that the client should wait between sending regular requests to the tracker
+    /// Interval in seconds that the client should wait between sending regular requests to the tracker.
     ///
     /// We can ignore this field for the purposes of this challenge.
-    pub interval: usize,
+    ///
+    /// We are wrapping it in `Option<>` because sometimes their test server (tracker) doesn't send it.
+    pub interval: Option<usize>,
 
     /// (binary model) A string consisting of multiples of 6 bytes.
     /// First 4 bytes are the IP address and last 2 bytes are the port number. All in network (big endian) notation.

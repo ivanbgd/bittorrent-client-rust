@@ -75,7 +75,6 @@ use crate::peer::Peer;
 use crate::tracker::peers::Peers;
 use crate::tracker::{TrackerRequest, TrackerResponse};
 use anyhow::Result;
-use bytes::{BufMut, Bytes};
 
 /// Parses a given magnet link.
 ///
@@ -138,26 +137,10 @@ async fn get_peers(tracker: Option<&str>, info_hash: String) -> Result<Peers, Ma
     };
 
     let resp = client.get(&req).query(&query).send().await?.bytes().await?;
-    let resp = add_interval(resp);
+    let resp = Vec::from(resp);
     let response: TrackerResponse = serde_bencode::from_bytes(&resp)?;
 
     Ok(response.peers)
-}
-
-/// A hack that was required because the test server (tracker) didn't return the field `interval` as part of
-/// the response, if ran on server. Namely, the tracker was returning the field if I ran it locally and
-/// connected to their server (tracker).
-fn add_interval(resp: Bytes) -> Vec<u8> {
-    let resp_clone = resp.clone();
-    let resp_str = String::from_utf8_lossy(&resp_clone);
-    let mut resp_vec = Vec::from(resp);
-    if !resp_str.contains("8:interval") {
-        // Remove the last 'e' that was ending the entire dictionary.
-        let _removed = resp_vec.remove(resp_vec.len() - 1);
-        // Also add back the last 'e' to end the entire dictionary.
-        resp_vec.put_slice(b"8:intervali60ee");
-    }
-    resp_vec
 }
 
 mod magnet_link {
