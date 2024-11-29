@@ -12,6 +12,9 @@ pub const SHA1_LEN: usize = 20;
 /// The type of hash sum used in the application: `[u8; 20]`, for the SHA-1 hash sum
 pub type HashType = [u8; SHA1_LEN];
 
+/// The name of our client
+pub const CLIENT_NAME: &str = "My client name 0.1";
+
 /// Our own Peer ID, 20 bytes long
 ///
 /// https://wiki.theory.org/BitTorrentSpecification#peer_id
@@ -76,5 +79,8 @@ pub const MAX_PIPELINED_REQUESTS: usize = 32;
 /// Maximal message frame size in bytes, 64 kB
 pub const MAX_FRAME_SIZE: usize = 1 << 16;
 
+/// The "ut_metadata" field name for the extension handshake message
+pub const UT_METADATA: &str = "ut_metadata";
+
 /// The "ut_metadata" ID for the extension handshake message
-pub const UT_METADATA: u8 = 1;
+pub const UT_METADATA_ID: u8 = 17;

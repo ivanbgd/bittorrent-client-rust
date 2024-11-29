@@ -69,6 +69,9 @@ async fn main() -> Result<(), String> {
         Commands::MagnetHandshake { magnet_link } => {
             let peer = magnet_handshake(magnet_link).await?;
             println!("Peer ID: {}", peer);
+            if let Some(ext_id) = peer.extension_id {
+                println!("Peer Metadata Extension ID: {ext_id}");
+            }
         }
     }
 

@@ -8,7 +8,7 @@ use std::num::TryFromIntError;
 use std::string::FromUtf8Error;
 use thiserror::Error;
 
-use crate::message::MessageId;
+use crate::message::{ExtendedMessageId, MessageId};
 
 /// Errors related to working with [`crate::meta_info`]
 #[derive(Debug, Error)]
@@ -83,6 +83,12 @@ pub enum MessageError {
     UnsupportedId(#[from] MessageIdError),
 
     #[error(transparent)]
+    SerdeBencode(#[from] serde_bencode::Error),
+
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
+
+    #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
 
@@ -130,7 +136,7 @@ pub enum PeerError {
     #[error("Tracker error: {0}")]
     TrackerError(#[from] TrackerError),
 
-    #[error("Wrong message ID: {0}; expected {1}")]
+    #[error("Wrong message ID: {0}, expected {1}")]
     WrongMessageId(MessageId, MessageId),
 
     /// Used at the beginning, if we can't find any per to work with at all.
@@ -169,6 +175,9 @@ pub enum PeerError {
 
     #[error("Wrong number of bytes written to file: expected {0}, got {1} bytes")]
     WrongWritten(usize, usize),
+
+    #[error("Wrong extended message ID: {0}, expected {1}")]
+    WrongExtendedMessageId(ExtendedMessageId, ExtendedMessageId),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),

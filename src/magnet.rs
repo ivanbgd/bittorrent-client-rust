@@ -69,11 +69,14 @@
 //! - Peer 3: `139.59.184.255:51548`
 
 use crate::constants::{
-    HashType, COMPACT, DOWNLOADED, PEER_ID, PORT, SHA1_LEN, UPLOADED, UT_METADATA,
+    HashType, CLIENT_NAME, COMPACT, DOWNLOADED, PEER_ID, PORT, SHA1_LEN, UPLOADED, UT_METADATA,
+    UT_METADATA_ID,
 };
 use crate::errors::{MagnetError, PeerError};
 use crate::magnet::magnet_link::MagnetLink;
-use crate::message::{ExtendedMessageId, ExtendedMessagePayload, Message, MessageId};
+use crate::message::{
+    ExtendedMessageHandshakeDict, ExtendedMessageId, ExtendedMessagePayload, Message, MessageId,
+};
 use crate::peer::Peer;
 use crate::tracker::peers::Peers;
 use crate::tracker::{TrackerRequest, TrackerResponse};
@@ -124,6 +127,8 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
         }
     };
 
+    // Send the bitfield message (safe to ignore in this challenge, so we are skipping this)
+
     // Receive a Bitfield message
     let msg = match peer.recv_msg().await {
         Ok(msg) => msg,
@@ -146,11 +151,18 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     // If the peer supports extensions (based on the reserved bit in the base handshake):
     if supports_ext {
         // Send the extension handshake message
-        let ext_hs = HashMap::from([("m", HashMap::from([("ut_metadata", UT_METADATA)]))]);
-        let dict = serde_json::to_value(&ext_hs)
-            .unwrap_or_else(|_| panic!("Couldn't convert {ext_hs:?} to `serde_json::Value`."));
-        let payload = ExtendedMessagePayload::new(ExtendedMessageId::Handshake, dict)?;
+        // let ext_hs = HashMap::from([("m", HashMap::from([("ut_metadata", UT_METADATA)]))]); // todo rem
+        // let dict = serde_json::to_value(&ext_hs).unwrap_or_else(|_| panic!("Couldn't convert {ext_hs:?} to `serde_json::Value`.")); // todo rem
+        // let payload = ExtendedMessagePayload::new(ExtendedMessageId::Handshake, dict)?; // todo rem
+        let ext_hs_dict = ExtendedMessageHandshakeDict::new(
+            Some(HashMap::from([(UT_METADATA.to_string(), UT_METADATA_ID)])),
+            Some(PORT),
+            Some(CLIENT_NAME.to_string()),
+        );
+        let payload = ExtendedMessagePayload::new(ExtendedMessageId::Handshake, ext_hs_dict)?;
         let msg = Message::new(MessageId::Extended, Some(payload.into()));
+        // let msg = Message::new(MessageId::Extended, Some(ext_hs_dict.try_into().unwrap()));
+        eprintln!("=> msg = {msg}"); // todo rem
         peer.feed(msg)
             .await
             .context("Feed the extension handshake message")?;
@@ -159,6 +171,45 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             .context("Flush the extension handshake message")?;
 
         // Receive the extension handshake message
+        let msg = match peer.recv_msg().await {
+            Ok(msg) => msg,
+            Err(err) => {
+                warn!("Receive the extension handshake message: {err:#}");
+                return Err(err.into());
+            }
+        };
+        eprintln!("<= msg = {msg}"); // todo rem
+        if msg.id != MessageId::Extended {
+            let err = PeerError::from((msg.id, MessageId::Bitfield));
+            warn!("Receive the extension handshake message: {err:#}");
+            return Err(err.into());
+        }
+        let payload: ExtendedMessagePayload = msg
+            .payload
+            // .clone() todo rem
+            .expect("Expected to have received the extension handshake message")
+            .try_into()
+            .unwrap(); // todo unwrap
+        eprintln!("<= payload = {payload}"); // todo rem
+        if payload.id != ExtendedMessageId::Handshake {
+            let err = PeerError::WrongExtendedMessageId(payload.id, ExtendedMessageId::Handshake);
+            warn!("Receive the extension handshake message: {err:#}");
+            return Err(err.into());
+        }
+        let dict: ExtendedMessageHandshakeDict = payload.dict.into();
+        eprintln!("<= payload.dict = {}", dict); // todo rem
+        eprintln!(
+            "<= m = {:?}",
+            dict.m.clone().expect("Expected field \"m\".")
+        ); // todo rem
+        peer.extension_id = Some(
+            *dict
+                .m
+                .expect("Expected field \"m\".")
+                .get(UT_METADATA)
+                .expect("Expected field \"ut_metadata\"."),
+        );
+        eprintln!("peer = {:?}", peer); // todo rem
     }
     // Note that the extension handshake message is only sent if the other peer supports extensions
     // (indicated by the reserved bit in the base handshake).

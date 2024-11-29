@@ -39,6 +39,9 @@ pub struct Peer {
 
     /// Represents the pieces that the peer has; received in a Bitfield message
     pub bitfield: Option<Vec<u8>>,
+
+    /// The peer's ID for the [`UT_METADATA`] field in the extension handshake message, if supported
+    pub extension_id: Option<u8>,
 }
 
 impl Peer {
@@ -49,6 +52,7 @@ impl Peer {
             stream: None,
             peer_id: None,
             bitfield: None,
+            extension_id: None,
         }
     }
 

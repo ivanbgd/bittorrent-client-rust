@@ -18,13 +18,15 @@
 //! We could write our own functions or methods that perform the conversions and that return
 //! results wrapped in [`anyhow::Error`].
 
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-use crate::bencode::bencode_value;
-use crate::constants::MAX_FRAME_SIZE;
+use crate::bencode::decode_bencoded_value;
+use crate::constants::{MAX_FRAME_SIZE, UT_METADATA};
 use crate::errors::{MessageCodecError, MessageError, MessageIdError, PiecePayloadError};
 use anyhow::{Context, Result};
 use bytes::{Buf, BufMut, BytesMut};
+use serde_derive::Serialize;
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Message types
@@ -128,6 +130,9 @@ pub enum MessageId {
     Unsupported,
 }
 
+/// In case we'd like to print [`MessageId`] as raw byte, i.e., as [`u8`].
+///
+/// Use [`Debug`] for human-readable output, which we derived for this enum.
 impl Display for MessageId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self as *const Self as u8)
@@ -191,11 +196,20 @@ impl Message {
 
 impl Display for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Message {{ len: {}, id: {:?}, payload: {:02X?} }}",
-            self.len, self.id, &self.payload
-        )
+        write!(f, "Message {{ len: {}, id: {:?}", self.len, self.id)?;
+        if self.id == MessageId::Extended {
+            let payload = self
+                .payload
+                .as_ref()
+                .expect("Payload should exist for extended messages.")
+                .to_owned();
+            let payload: ExtendedMessagePayload = payload
+                .try_into()
+                .expect("Failed to convert raw payload, Vec<u8>, to ExtendedMessagePayload.");
+            write!(f, ", payload: {} }}", payload)
+        } else {
+            write!(f, ", payload: {:02X?} }}", &self.payload)
+        }
     }
 }
 
@@ -222,7 +236,7 @@ impl From<Message> for Vec<u8> {
 impl TryFrom<Vec<u8>> for Message {
     type Error = MessageError;
 
-    /// Deserializes a [`Message`] received from a wire transfer.
+    /// Deserializes a byte stream received from a wire transfer into [`Message`].
     fn try_from(value: Vec<u8>) -> Result<Message, MessageError> {
         let len = u32::from_be_bytes(<[u8; 4]>::try_from(&value[0..4]).with_context(|| {
             format!(
@@ -263,6 +277,17 @@ impl RequestPayload {
             begin,
             length,
         }
+    }
+}
+
+/// Unused
+impl Display for RequestPayload {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "-> piece_i = {:3}, begin = {:6}, length = {:5}",
+            self.index, self.begin, self.length
+        )
     }
 }
 
@@ -447,8 +472,14 @@ impl Encoder<Message> for MessageCodec {
     }
 }
 
+//////////////////////////////////////////////////////////////////////////////
+
+/*                     Extended Message Support                             */
+
+//////////////////////////////////////////////////////////////////////////////
+
 /// See: https://www.bittorrent.org/beps/bep_0010.html
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
 pub enum ExtendedMessageId {
     /// Extension handshake message
     Handshake = 0,
@@ -457,6 +488,9 @@ pub enum ExtendedMessageId {
     Unsupported,
 }
 
+/// In case we'd like to print [`ExtendedMessageId`] as raw byte, i.e., as [`u8`].
+///
+/// Use [`Debug`] for human-readable output, which we derived for this enum.
 impl Display for ExtendedMessageId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self as *const Self as u8)
@@ -488,15 +522,31 @@ impl TryFrom<u8> for ExtendedMessageId {
 ///     - The inner dictionary maps supported extension names to their corresponding message IDs.
 ///
 /// See: https://www.bittorrent.org/beps/bep_0010.html
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ExtendedMessagePayload {
-    id: ExtendedMessageId,
-    dict: Vec<u8>,
+    pub id: ExtendedMessageId,
+    pub dict: Vec<u8>,
+}
+
+impl Display for ExtendedMessagePayload {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ id: {:?}, dict: {:?} }}",
+            self.id,
+            String::from_utf8_lossy(&self.dict)
+        )
+    }
 }
 
 impl ExtendedMessagePayload {
-    pub fn new(id: ExtendedMessageId, dict: serde_json::Value) -> Result<Self, anyhow::Error> {
-        let dict = bencode_value(dict)?;
+    pub(crate) fn new(
+        id: ExtendedMessageId,
+        // dict: serde_json::Value,todo rem
+        dict: ExtendedMessageHandshakeDict,
+    ) -> Result<Self, anyhow::Error> {
+        // let dict = bencode_value(dict)?;todo rem
+        let dict = serde_bencode::to_bytes(&dict)?;
 
         Ok(Self { id, dict })
     }
@@ -506,7 +556,7 @@ impl ExtendedMessagePayload {
 impl From<ExtendedMessagePayload> for Vec<u8> {
     /// Serializes a [`ExtendedMessagePayload`] for a send transfer over the wire.
     fn from(value: ExtendedMessagePayload) -> Self {
-        let id: u8 = value.id.into();
+        let id = value.id.into();
         let dict = value.dict;
 
         let mut buf = Vec::with_capacity(1 + dict.len());
@@ -518,11 +568,117 @@ impl From<ExtendedMessagePayload> for Vec<u8> {
     }
 }
 
-// todo rem
-// #[derive(Debug)]
-// pub struct ExtendedMessageHandshakeDict {
+/// Converts a byte stream into a [`ExtendedMessagePayload`].
+impl TryFrom<Vec<u8>> for ExtendedMessagePayload {
+    type Error = MessageError;
+
+    /// Deserializes a byte stream received from a wire transfer into [`ExtendedMessagePayload`].
+    fn try_from(value: Vec<u8>) -> Result<ExtendedMessagePayload, MessageError> {
+        // let val = String::from_utf8_lossy(&value).into_owned(); //.unwrap(); // todo rem
+        // eprintln!("val = {val:?}");
+
+        let id = value[0].try_into()?;
+        let dict = value[1..].to_vec();
+
+        Ok(ExtendedMessagePayload { id, dict })
+    }
+}
+
+/// See: https://www.bittorrent.org/beps/bep_0010.html
+///
+/// For the bencoding part see: https://www.bittorrent.org/beps/bep_0003.html
+///
+/// Keys must be strings and appear in sorted order (sorted as raw strings, not alphanumerics).
+#[derive(Debug, Serialize)]
+pub struct ExtendedMessageHandshakeDict {
+    pub(crate) m: Option<HashMap<String, u8>>,
+    p: Option<u16>,
+    v: Option<String>,
+}
+
+impl Display for ExtendedMessageHandshakeDict {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ExtendedMessageHandshakeDict {{ m: {:?}, p: {:?}, v: {:?} }}",
+            self.m, self.p, self.v
+        )
+    }
+}
+
+impl ExtendedMessageHandshakeDict {
+    /// Takes fields `m`, `p` and `v` and stores them in the dictionary.
+    ///
+    /// See: https://www.bittorrent.org/beps/bep_0010.html
+    pub(crate) fn new(m: Option<HashMap<String, u8>>, p: Option<u16>, v: Option<String>) -> Self {
+        Self { m, p, v }
+    }
+}
+
+// // TODO: I don't think this is correct. We should bencode a ExtendedMessageHandshakeDict instead.
+// /// Converts a [`ExtendedMessageHandshakeDict`] into a byte stream.
+// impl TryFrom<ExtendedMessageHandshakeDict<'_>> for Vec<u8> {
+//     type Error = MessageError;
 //
+//     /// Serializes a [`ExtendedMessageHandshakeDict`] for a send transfer over the wire.
+//     fn try_from(value: ExtendedMessageHandshakeDict) -> Result<Self, Self::Error> {
+//         // let mut res: Vec<u8> = vec![];
+//         //
+//         // if let Some(m) = value.m {
+//         //     res.push(b'm');
+//         //     res.extend_from_slice(&serde_json::to_vec(&m)?);
+//         // }
+//         //
+//         // if let Some(p) = value.p {
+//         //     res.push(b'p');
+//         //     res.extend_from_slice(&serde_json::to_vec(&p)?);
+//         // }
+//         //
+//         // if let Some(v) = value.v {
+//         //     res.push(b'v');
+//         //     res.extend_from_slice(&serde_json::to_vec(&v)?);
+//         // }
+//         //
+//         // Ok(serde_bencode::to_bytes(&res)?)
+//
+//         Ok(serde_bencode::to_bytes(&value)?)
+//     }
 // }
+
+/// Converts a byte stream into a [`ExtendedMessageHandshakeDict`].
+impl From<Vec<u8>> for ExtendedMessageHandshakeDict {
+    /// Deserializes a byte stream received from a wire transfer into [`ExtendedMessageHandshakeDict`].
+    fn from(value: Vec<u8>) -> Self {
+        // todo!() // todo rem
+        eprintln!("value = {value:?}"); // todo rem
+        let val = String::from_utf8_lossy(&value).into_owned(); //.unwrap(); // todo rem
+        eprintln!("val = {val:?}"); // todo rem
+
+        let val = decode_bencoded_value(&value).unwrap();
+        eprintln!("val = {val:?}"); // todo rem
+
+        let m: Option<HashMap<String, u8>>; // todo rem
+        let m = Some(HashMap::from([("aaa".to_string(), 33)])); // TODO!
+
+        let map = val.get("m").map(|m| m.as_object().unwrap());
+        let mut m: HashMap<String, u8> = HashMap::new();
+        // TODO: Insert ALL fields!
+        m.insert(
+            UT_METADATA.to_string(),
+            map.unwrap_or_else(|| panic!("Expected field \"{UT_METADATA}\"."))
+                .get(UT_METADATA)
+                .unwrap()
+                .as_u64()
+                .unwrap() as u8,
+        );
+        let m = Some(m);
+        let p = val.get("p").map(|p| p.as_u64().unwrap() as u16);
+        let v = val.get("v").map(|v| v.as_str().unwrap().to_string());
+        eprintln!("* m = {m:?}"); // todo rem
+
+        Self { m, p, v }
+    }
+}
 
 // todo: needed?
 /// See: https://www.bittorrent.org/beps/bep_0009.html
