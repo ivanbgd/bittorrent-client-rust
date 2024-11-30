@@ -11,6 +11,7 @@
 //! - ./your_bittorrent.sh download -o <path_to_output_file> <path_to_torrent_file>
 //! - ./your_bittorrent.sh magnet_parse "<magnet-link>"
 //! - ./your_bittorrent.sh magnet_handshake "<magnet-link>"
+//! - ./your_bittorrent.sh magnet_info "<magnet-link>"
 //! ```
 
 use anyhow::Result;
@@ -21,7 +22,7 @@ use bittorrent_starter_rust::bencode::decode_bencoded_value;
 use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::config::get_config;
 use bittorrent_starter_rust::errors::ae2s;
-use bittorrent_starter_rust::magnet::{magnet_handshake, parse_magnet_link};
+use bittorrent_starter_rust::magnet::{magnet_handshake, magnet_info, parse_magnet_link};
 use bittorrent_starter_rust::meta_info::meta_info;
 use bittorrent_starter_rust::peer_comm::{download, download_piece, handshake};
 use bittorrent_starter_rust::tracker::get_peers;
@@ -72,6 +73,9 @@ async fn main() -> Result<(), String> {
             if let Some(ext_id) = peer.extension_id {
                 println!("Peer Metadata Extension ID: {ext_id}");
             }
+        }
+        Commands::MagnetInfo { magnet_link } => {
+            magnet_info(magnet_link).await?;
         }
     }
 

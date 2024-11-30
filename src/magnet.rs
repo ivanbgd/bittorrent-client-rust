@@ -51,11 +51,19 @@
 //! Info Hash: ad42ce8109f54c99613ce38f9b4d87e70f24a165
 //! ```
 //!
-//! ### Announce Extension Support
+//! ### Announce Extension Support, Send & Receive Extension Handshake
 //!
 //! ```shell
 //! $ ./your_bittorrent.sh magnet_handshake "<magnet-link>"
 //! ```
+//!
+//! ### Request & Receive Metadata
+//!
+//! ```shell
+//! $ ./your_bittorrent.sh magnet_info "<magnet-link>"
+//! ```
+//!
+//! ### Magnet Links for Local Testing
 //!
 //! We can use [these magnet links](https://github.com/codecrafters-io/bittorrent-test-seeder/blob/main/torrent_files/magnet_links.txt)
 //! to test program locally. They are copied below.
@@ -75,7 +83,8 @@ use crate::constants::{
 use crate::errors::{MagnetError, PeerError};
 use crate::magnet::magnet_link::MagnetLink;
 use crate::message::{
-    ExtendedMessageHandshakeDict, ExtendedMessageId, ExtendedMessagePayload, Message, MessageId,
+    ExtendedMessageHandshakeDict, ExtendedMessageHandshakePayload, ExtendedMessageId,
+    ExtensionRequestPayload, Message, MessageId,
 };
 use crate::peer::Peer;
 use crate::tracker::peers::Peers;
@@ -156,7 +165,8 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             Some(PORT),
             Some(CLIENT_NAME.to_string()),
         );
-        let payload = ExtendedMessagePayload::new(ExtendedMessageId::Handshake, ext_hs_dict)?;
+        let payload =
+            ExtendedMessageHandshakePayload::new(ExtendedMessageId::Handshake, ext_hs_dict)?;
         let msg = Message::new(MessageId::Extended, Some(payload.into()));
         debug!("-> msg = {msg}");
         peer.feed(msg)
@@ -180,7 +190,7 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             warn!("Receive the extension handshake message: {err:#}");
             return Err(err.into());
         }
-        let payload: ExtendedMessagePayload = msg
+        let payload: ExtendedMessageHandshakePayload = msg
             .payload
             .expect("Expected to have received the extension handshake message")
             .try_into()?;
@@ -209,6 +219,33 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     // This is how backward compatibility is maintained with peers that don't support extensions.
 
     Ok(peer)
+}
+
+/// Request torrent metadata from a peer using the metadata extension.
+///
+/// ```shell
+/// $ ./your_bittorrent.sh magnet_info "<magnet-link>"
+/// ```
+pub async fn magnet_info(magnet_link: &str) -> Result<(), MagnetError> {
+    // <=> Perform the extension handshake and get the peer
+    let mut peer = magnet_handshake(magnet_link).await?;
+
+    // -> Send the metadata request message
+    let piece_index: usize = 0;
+    let payload = ExtensionRequestPayload::new(
+        ExtendedMessageId::Custom(peer.extension_id.ok_or(peer.addr)?),
+        piece_index,
+    )?;
+    let msg = Message::new(MessageId::Extended, Some(payload.into()));
+    debug!("-> msg = {msg}");
+    peer.feed(msg)
+        .await
+        .context("Feed the metadata request message")?;
+    peer.flush()
+        .await
+        .context("Flush the metadata request message")?;
+
+    Ok(())
 }
 
 /// Fetches and returns the peers list.

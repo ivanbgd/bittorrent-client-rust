@@ -204,7 +204,7 @@ impl Display for Message {
                 .as_ref()
                 .expect("Payload should exist for extended messages.")
                 .to_owned();
-            let payload: ExtendedMessagePayload = payload
+            let payload: ExtendedMessageHandshakePayload = payload
                 .try_into()
                 .expect("Failed to convert raw payload, Vec<u8>, to ExtendedMessagePayload.");
             write!(f, ", payload: {} }}", payload)
@@ -380,6 +380,16 @@ impl<'a> TryFrom<&'a [u8]> for PiecePayload<'a> {
     }
 }
 
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+
+/*                            Message Codec                                 */
+
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+
 #[derive(Debug)]
 pub struct MessageCodec;
 
@@ -474,23 +484,28 @@ impl Encoder<Message> for MessageCodec {
 }
 
 //////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
 
 /*                     Extended Message Support                             */
 
 //////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
 
 /// At the start of the payload of the message, is a single byte message identifier.
-/// This identifier can refer to different extension messages and only one ID is specified, 0.
-/// If the ID is 0, the message is a handshake message.
+/// This identifier can refer to different extension messages and only one ID is specified, `0`.
+/// If the ID is `0`, the message is a handshake message.
 ///
 /// See: https://www.bittorrent.org/beps/bep_0010.html
 #[derive(Debug, PartialEq, Serialize)]
+#[repr(u8)]
 pub enum ExtendedMessageId {
     /// Extension handshake message
     Handshake = 0,
 
-    /// Unsupported message ID
-    Unsupported,
+    /// Any other message ID, which can be an arbitrary [`u8`] value different from `0`
+    Custom(u8),
 }
 
 /// In case we'd like to print [`ExtendedMessageId`] as raw byte, i.e., as [`u8`].
@@ -504,7 +519,10 @@ impl Display for ExtendedMessageId {
 
 impl From<ExtendedMessageId> for u8 {
     fn from(value: ExtendedMessageId) -> u8 {
-        value as u8
+        match value {
+            ExtendedMessageId::Handshake => 0u8,
+            ExtendedMessageId::Custom(v) => v,
+        }
     }
 }
 
@@ -514,7 +532,10 @@ impl TryFrom<u8> for ExtendedMessageId {
     fn try_from(value: u8) -> Result<ExtendedMessageId, MessageIdError> {
         match value {
             0 => Ok(ExtendedMessageId::Handshake),
-            v => Err(MessageIdError::UnsupportedId(v)),
+            v => match v {
+                0 => Err(MessageIdError::UnsupportedId(v)),
+                v => Ok(ExtendedMessageId::Custom(v)),
+            },
         }
     }
 }
@@ -528,12 +549,12 @@ impl TryFrom<u8> for ExtendedMessageId {
 ///
 /// See: https://www.bittorrent.org/beps/bep_0010.html
 #[derive(Debug, Serialize)]
-pub struct ExtendedMessagePayload {
+pub struct ExtendedMessageHandshakePayload {
     pub id: ExtendedMessageId,
     pub dict: Vec<u8>,
 }
 
-impl Display for ExtendedMessagePayload {
+impl Display for ExtendedMessageHandshakePayload {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -544,22 +565,22 @@ impl Display for ExtendedMessagePayload {
     }
 }
 
-impl ExtendedMessagePayload {
+impl ExtendedMessageHandshakePayload {
     /// Serializes `dict` into a bencode byte vector and stores it as such.
     pub(crate) fn new(
         id: ExtendedMessageId,
         dict: ExtendedMessageHandshakeDict,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<Self, MessageError> {
         let dict = serde_bencode::to_bytes(&dict)?;
 
         Ok(Self { id, dict })
     }
 }
 
-/// Converts a [`ExtendedMessagePayload`] into a byte stream.
-impl From<ExtendedMessagePayload> for Vec<u8> {
-    /// Serializes a [`ExtendedMessagePayload`] for a send transfer over the wire.
-    fn from(value: ExtendedMessagePayload) -> Self {
+/// Converts a [`ExtendedMessageHandshakePayload`] into a byte stream.
+impl From<ExtendedMessageHandshakePayload> for Vec<u8> {
+    /// Serializes a [`ExtendedMessageHandshakePayload`] for a send transfer over the wire.
+    fn from(value: ExtendedMessageHandshakePayload) -> Self {
         let id = value.id.into();
         let dict = value.dict;
 
@@ -572,16 +593,16 @@ impl From<ExtendedMessagePayload> for Vec<u8> {
     }
 }
 
-/// Converts a byte stream into a [`ExtendedMessagePayload`].
-impl TryFrom<Vec<u8>> for ExtendedMessagePayload {
+/// Converts a byte stream into a [`ExtendedMessageHandshakePayload`].
+impl TryFrom<Vec<u8>> for ExtendedMessageHandshakePayload {
     type Error = MessageError;
 
-    /// Deserializes a byte stream received from a wire transfer into [`ExtendedMessagePayload`].
-    fn try_from(value: Vec<u8>) -> Result<ExtendedMessagePayload, MessageError> {
+    /// Deserializes a byte stream received from a wire transfer into [`ExtendedMessageHandshakePayload`].
+    fn try_from(value: Vec<u8>) -> Result<ExtendedMessageHandshakePayload, MessageError> {
         let id = value[0].try_into()?;
         let dict = value[1..].to_vec();
 
-        Ok(ExtendedMessagePayload { id, dict })
+        Ok(ExtendedMessageHandshakePayload { id, dict })
     }
 }
 
@@ -670,14 +691,102 @@ impl TryFrom<Vec<u8>> for ExtendedMessageHandshakeDict {
     }
 }
 
-// todo: needed?
-/// See: https://www.bittorrent.org/beps/bep_0009.html
+/// See: https://www.bittorrent.org/beps/bep_0009.html#extension-message
 #[derive(Debug, PartialEq)]
 pub enum ExtensionMessageId {
+    /// Requests a piece of metadata from the peer
     Request = 0,
+
+    /// Sends a piece of metadata to the peer
     Data = 1,
+
+    /// Signals that the peer doesn't have the piece of metadata that was requested
     Reject = 2,
 
     /// Unsupported message ID
     Unsupported,
+}
+
+impl From<ExtensionMessageId> for u8 {
+    fn from(value: ExtensionMessageId) -> u8 {
+        value as u8
+    }
+}
+
+impl From<ExtensionMessageId> for usize {
+    fn from(value: ExtensionMessageId) -> usize {
+        value as usize
+    }
+}
+
+/// Payload for the [`MessageId::Extended`].[`ExtensionMessageId::Request`] message
+///
+/// The Extension message payload is structured as follows:
+/// - Extended message id (1 byte):
+///     - The peer's extension id.
+/// - Bencoded dictionary (variable size):
+///     - This dictionary will look like this: `{'msg_type': 0, 'piece': 0}` (encoded as a bencoded dictionary).
+///     - `msg_type` will be `0` since this is a request message.
+///     - `piece` is the zero-based piece index of the metadata being requested.
+///
+/// See: https://www.bittorrent.org/beps/bep_0009.html#extension-message
+#[derive(Debug, Serialize)]
+pub struct ExtensionRequestPayload {
+    pub id: ExtendedMessageId,
+    pub dict: Vec<u8>,
+}
+
+impl Display for ExtensionRequestPayload {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ id: {:?}, dict: {:?} }}",
+            self.id,
+            String::from_utf8_lossy(&self.dict)
+        )
+    }
+}
+
+impl ExtensionRequestPayload {
+    /// Creates a new extension request payload consisting of the peer's extension id and piece index.
+    ///
+    /// Serializes `dict` into a bencode byte vector and stores it as such.
+    pub fn new(id: ExtendedMessageId, piece_index: usize) -> Result<Self, MessageError> {
+        let dict = HashMap::from([
+            ("msg_type".to_string(), ExtensionMessageId::Request.into()),
+            ("piece".to_string(), piece_index),
+        ]);
+        let dict = serde_bencode::to_bytes(&dict)?;
+
+        Ok(Self { id, dict })
+    }
+}
+
+/// Converts a [`ExtensionRequestPayload`] into a byte stream.
+impl From<ExtensionRequestPayload> for Vec<u8> {
+    /// Serializes a [`ExtensionRequestPayload`] for a send transfer over the wire.
+    fn from(value: ExtensionRequestPayload) -> Self {
+        let id = value.id.into();
+        let dict = value.dict;
+
+        let mut buf: Vec<u8> = Vec::with_capacity(1 + dict.len());
+
+        buf.push(id);
+        buf.extend(dict);
+
+        buf
+    }
+}
+
+/// Converts a byte stream into a [`ExtensionRequestPayload`].
+impl TryFrom<Vec<u8>> for ExtensionRequestPayload {
+    type Error = MessageError;
+
+    /// Deserializes a byte stream received from a wire transfer into [`ExtensionRequestPayload`].
+    fn try_from(value: Vec<u8>) -> Result<ExtensionRequestPayload, MessageError> {
+        let id = value[0].try_into()?;
+        let dict = value[1..].to_vec();
+
+        Ok(ExtensionRequestPayload { id, dict })
+    }
 }

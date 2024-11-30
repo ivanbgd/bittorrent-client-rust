@@ -13,7 +13,7 @@ pub const SHA1_LEN: usize = 20;
 pub type HashType = [u8; SHA1_LEN];
 
 /// The name of our client
-pub const CLIENT_NAME: &str = "My client name 0.1";
+pub const CLIENT_NAME: &str = "Ivan's BitTorrent Client v0.1";
 
 /// Our own Peer ID, 20 bytes long
 ///

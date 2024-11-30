@@ -239,7 +239,10 @@ pub enum MagnetError {
     DeserializeError(#[from] serde_bencode::Error),
 
     #[error(transparent)]
-    MessageError(#[from] MessageError),
+    MessageErr(#[from] MessageError),
+
+    #[error("Peer's {0} extension ID not set.")]
+    PeerExtensionIdNotSet(SocketAddrV4),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
@@ -248,6 +251,12 @@ pub enum MagnetError {
 impl PartialEq for MagnetError {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
+    }
+}
+
+impl From<SocketAddrV4> for MagnetError {
+    fn from(value: SocketAddrV4) -> Self {
+        MagnetError::PeerExtensionIdNotSet(value)
     }
 }
 

@@ -22,7 +22,7 @@ pub enum Commands {
         encoded_value: String,
     },
 
-    /// Print a torrent's meta info
+    /// Print meta info obtained from a torrent file
     Info {
         /// Path to a torrent file
         torrent: PathBuf,
@@ -76,6 +76,12 @@ pub enum Commands {
 
     /// Extension handshake
     MagnetHandshake {
+        /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>
+        magnet_link: String,
+    },
+
+    /// Print meta info obtained from a magnet link
+    MagnetInfo {
         /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>
         magnet_link: String,
     },

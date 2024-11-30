@@ -56,7 +56,7 @@ pub async fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError>
     // Plain byte representation of the SHA1 sum of the Info dictionary, 20 bytes long.
     let info_hash = &meta.info.info_hash;
 
-    // Hexadecimal string representation of the SHA1 sum of the Info dictionary, 40 bytes long.
+    // Percent-encoded variant of the 20 byte long Info hash (not hex-encoded).
     let info_hash = url_encode(info_hash);
 
     // Currently, only the single-file torrents are supported.
@@ -82,19 +82,31 @@ pub async fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError>
     Ok((response.peers, meta.info))
 }
 
-/// https://en.wikipedia.org/wiki/Percent-encoding
+/// Uses the crate [`urlencoding`] for percent-encoding of the input.
 ///
-/// https://en.wikipedia.org/wiki/Percent-encoding#Types_of_URI_characters
+/// Example use: Pass it a 20 byte long slice of bytes (such as a plain byte representation of the SHA1 sum
+/// of the Info dictionary, so not hex-encoded).
+///
+/// For percent-encoding explanation see:
+/// - https://en.wikipedia.org/wiki/Percent-encoding
+/// - https://en.wikipedia.org/wiki/Percent-encoding#Types_of_URI_characters
 pub(crate) fn url_encode(s: &[u8]) -> String {
     urlencoding::encode_binary(s).into_owned()
 }
 
-/// https://en.wikipedia.org/wiki/Percent-encoding
+/// My own implementation of percent-encoding.
 ///
-/// https://en.wikipedia.org/wiki/Percent-encoding#Types_of_URI_characters
+/// Expects a hex-encoded string as input.
+///
+/// Example use: Pass it a 40 byte long hex encoded string (such as a hexadecimal string representation of the SHA1 sum
+/// of the Info dictionary).
+///
+/// For percent-encoding explanation see:
+/// - https://en.wikipedia.org/wiki/Percent-encoding
+/// - https://en.wikipedia.org/wiki/Percent-encoding#Types_of_URI_characters
 fn _url_encode(s: &str) -> String {
     let info = s.as_bytes();
-    let mut res: String = String::with_capacity(2 * SHA1_LEN + SHA1_LEN);
+    let mut res: String = String::with_capacity(s.len() + s.len() / 2);
     let mut i: usize = 0;
     while i < s.len() {
         let c1 = char::from(info[i]);
