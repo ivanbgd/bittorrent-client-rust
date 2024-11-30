@@ -692,7 +692,7 @@ async fn local_get_peers(
     //     one to download which piece.
     // - Don't store peer_idx inside Peer, at least not as-is, because we could skip adding a peer in this loop.
     for (peer_idx, peer) in peers.iter_mut().enumerate().take(peers_len) {
-        // Establish a TCP connection with a peer, and perform a base handshake
+        // <=> Establish a TCP connection with a peer, and perform a base handshake
         let mut peer = match handshake(peer, &info.info_hash).await {
             Ok(peer) => peer,
             Err(err) => {
@@ -702,7 +702,7 @@ async fn local_get_peers(
         };
         trace!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
-        // Send a Bitfield message
+        // -> Send a Bitfield message
         // This can be safely ignored in this challenge, but we're doing it anyway.
         // We are setting the Bitfield payload to all zeros, which means that we don't have any piece.
         // In reality, we'd set it to show which pieces we have.
@@ -711,7 +711,7 @@ async fn local_get_peers(
         peer.feed(msg).await.context("Feed the Bitfield message")?;
         peer.flush().await.context("Flush the Bitfield message")?;
 
-        // Receive a Bitfield message
+        // <= Receive a Bitfield message
         // This message is optional, and need not be sent if a peer has no pieces.
         // If the peer doesn't have any pieces, we can skip it.
         let msg = match peer.recv_msg().await {
@@ -723,7 +723,7 @@ async fn local_get_peers(
         };
         trace!("01 peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Bitfield {
-            let err = PeerError::from((msg.id, MessageId::Bitfield));
+            let err = PeerError::WrongMessageId(msg.id, MessageId::Bitfield);
             warn!("Receive a Bitfield message: {err:#}");
             continue;
         }
@@ -733,14 +733,14 @@ async fn local_get_peers(
                 .expect("Expected to have received a Bitfield message"),
         );
 
-        // Send the Interested message
+        // -> Send the Interested message
         let msg = Message::new(MessageId::Interested, None);
         peer.feed(msg)
             .await
             .context("Feed the Interested message")?;
         peer.flush().await.context("Flush the Interested message")?;
 
-        // Receive an Unchoke message
+        // <= Receive an Unchoke message
         let msg = match peer.recv_msg().await {
             Ok(msg) => msg,
             Err(err) => {

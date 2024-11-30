@@ -11,7 +11,7 @@ use crate::message::{Message, MessageCodec};
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use log::trace;
+use log::debug;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -115,7 +115,7 @@ impl Peer {
         if buf[HANDSHAKE_RESERVED_RANGE][5] & EXTENSION_SUPPORT_BIT != 0 {
             supports_ext = true;
         }
-        trace!("Peer {} supports_ext = {supports_ext}", self.addr);
+        debug!("Peer {} supports_ext = {supports_ext}", self.addr);
 
         let stream = Framed::new(stream, MessageCodec);
 

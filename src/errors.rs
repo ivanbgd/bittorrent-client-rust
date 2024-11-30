@@ -239,6 +239,9 @@ pub enum MagnetError {
     DeserializeError(#[from] serde_bencode::Error),
 
     #[error(transparent)]
+    MessageError(#[from] MessageError),
+
+    #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
 
