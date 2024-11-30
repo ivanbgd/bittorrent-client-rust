@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
 use crate::errors::TrackerError;
-use crate::meta_info::{meta_info, Info};
+use crate::meta_info::{read_meta_info, Info};
 use crate::tracker::peers::Peers;
 
 /// Fetches and returns the peers list and the decoded [`Info`] section (dictionary) of the torrent file.
@@ -48,7 +48,7 @@ use crate::tracker::peers::Peers;
 ///
 /// All error types are wrapped in [`TrackerError`].
 pub async fn get_peers(torrent: &PathBuf) -> Result<(Peers, Info), TrackerError> {
-    let meta = meta_info(torrent)?;
+    let meta = read_meta_info(torrent)?;
     let tracker = meta.announce;
 
     // The 20 byte sha1 hash of the bencoded form of the info value from the metainfo file.

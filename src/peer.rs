@@ -7,7 +7,7 @@ use std::net::SocketAddrV4;
 
 use crate::constants::*;
 use crate::errors::PeerError;
-use crate::message::{Message, MessageCodec};
+use crate::message::{ExtendedMessageHandshakeDict, Message, MessageCodec};
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
@@ -40,8 +40,14 @@ pub struct Peer {
     /// Represents the pieces that the peer has; received in a Bitfield message
     pub bitfield: Option<Vec<u8>>,
 
-    /// The peer's ID for the [`UT_METADATA`] field in the extension handshake message, if supported
-    pub extension_id: Option<u8>,
+    /// The peer's extension dictionary
+    ///
+    /// It is optional itself, and all its fields are optional, too.
+    ///
+    /// Contains the peer's ID for the [`UT_METADATA`] field in the extension handshake message, if supported.
+    ///
+    /// May also contain metadata size.
+    extension_dict: Option<ExtendedMessageHandshakeDict>,
 }
 
 impl Peer {
@@ -52,8 +58,41 @@ impl Peer {
             stream: None,
             peer_id: None,
             bitfield: None,
-            extension_id: None,
+            extension_dict: None,
         }
+    }
+
+    /// Setter for `self.extension_dict`
+    pub(crate) fn set_extension_dict(&mut self, dict: ExtendedMessageHandshakeDict) {
+        self.extension_dict = Some(dict);
+    }
+
+    /// Getter for `self.extension_dict`
+    pub(crate) fn get_extension_dict(&self) -> &Option<ExtendedMessageHandshakeDict> {
+        &self.extension_dict
+    }
+
+    /// Gets `extension_id`
+    pub fn get_extension_id(&self) -> Result<u8, PeerError> {
+        Ok(*self
+            .extension_dict
+            .as_ref()
+            .ok_or((self.addr, "extension_dict".to_string()))?
+            .m
+            .as_ref()
+            .ok_or((self.addr, "m".to_string()))?
+            .get(UT_METADATA)
+            .ok_or((self.addr, UT_METADATA.to_string()))?)
+    }
+
+    /// Gets `metadata_size`
+    pub(crate) fn get_metadata_size(&self) -> Result<usize, PeerError> {
+        Ok(self
+            .extension_dict
+            .as_ref()
+            .ok_or((self.addr, "extension_dict".to_string()))?
+            .metadata_size
+            .ok_or((self.addr, "metadata_size".to_string()))?)
     }
 
     /// Sends a handshake to a peer, and receives a handshake from the peer, in the same format.

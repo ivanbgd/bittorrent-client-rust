@@ -22,8 +22,8 @@ use bittorrent_starter_rust::bencode::decode_bencoded_value;
 use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::config::get_config;
 use bittorrent_starter_rust::errors::ae2s;
-use bittorrent_starter_rust::magnet::{magnet_handshake, magnet_info, parse_magnet_link};
-use bittorrent_starter_rust::meta_info::meta_info;
+use bittorrent_starter_rust::magnet::{magnet_handshake, parse_magnet_link, request_magnet_info};
+use bittorrent_starter_rust::meta_info::read_meta_info;
 use bittorrent_starter_rust::peer_comm::{download, download_piece, handshake};
 use bittorrent_starter_rust::tracker::get_peers;
 
@@ -41,7 +41,7 @@ async fn main() -> Result<(), String> {
             println!("{}", decoded_value);
         }
         Commands::Info { torrent } => {
-            let meta = meta_info(torrent)?;
+            let meta = read_meta_info(torrent)?;
             println!("{}", meta);
         }
         Commands::Peers { torrent } => {
@@ -49,7 +49,7 @@ async fn main() -> Result<(), String> {
             println!("{}", peers);
         }
         Commands::Handshake { torrent, peer } => {
-            let peer = handshake(peer, &meta_info(torrent)?.info.info_hash).await?;
+            let peer = handshake(peer, &read_meta_info(torrent)?.info.info_hash).await?;
             println!("Peer ID: {}", peer);
         }
         Commands::DownloadPiece {
@@ -70,12 +70,11 @@ async fn main() -> Result<(), String> {
         Commands::MagnetHandshake { magnet_link } => {
             let peer = magnet_handshake(magnet_link).await?;
             println!("Peer ID: {}", peer);
-            if let Some(ext_id) = peer.extension_id {
-                println!("Peer Metadata Extension ID: {ext_id}");
-            }
+            let ext_id = peer.get_extension_id()?;
+            println!("Peer Metadata Extension ID: {ext_id}");
         }
         Commands::MagnetInfo { magnet_link } => {
-            magnet_info(magnet_link).await?;
+            request_magnet_info(magnet_link).await?;
         }
     }
 

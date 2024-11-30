@@ -617,7 +617,7 @@ impl TryFrom<Vec<u8>> for ExtendedMessageHandshakePayload {
 ///
 /// For the bencoding part see: https://www.bittorrent.org/beps/bep_0003.html
 /// - Keys must be strings and appear in sorted order (sorted as raw strings, not alphanumerics).
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ExtendedMessageHandshakeDict {
     /// Dictionary of supported extension messages which maps names of extensions to an extended message ID
     /// for each extension message. The only requirement on these IDs is that no extension message share the same one.
@@ -627,6 +627,9 @@ pub struct ExtendedMessageHandshakeDict {
     /// The extension message IDs are the IDs used to send the extension messages to the peer sending this handshake,
     /// i.e., the IDs are local to this particular peer.
     pub(crate) m: Option<HashMap<String, u8>>,
+
+    /// An integer value of the number of bytes of the metadata.
+    pub(crate) metadata_size: Option<usize>,
 
     /// Local TCP listen port. Allows each side to learn about the TCP port number of the other side.
     /// Note that there is no need for the receiving side of the connection to send this extension message,
@@ -642,18 +645,28 @@ impl Display for ExtendedMessageHandshakeDict {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ExtendedMessageHandshakeDict {{ m: {:?}, p: {:?}, v: {:?} }}",
-            self.m, self.p, self.v
+            "ExtendedMessageHandshakeDict {{ m: {:?}, metadata_size: {:?}, p: {:?}, v: {:?} }}",
+            self.m, self.metadata_size, self.p, self.v
         )
     }
 }
 
 impl ExtendedMessageHandshakeDict {
-    /// Takes fields `m`, `p` and `v` and stores them in the dictionary.
+    /// Takes fields `m`, `metadata_size`, `p` and `v` and stores them in the dictionary.
     ///
     /// See: https://www.bittorrent.org/beps/bep_0010.html
-    pub(crate) fn new(m: Option<HashMap<String, u8>>, p: Option<u16>, v: Option<String>) -> Self {
-        Self { m, p, v }
+    pub(crate) fn new(
+        m: Option<HashMap<String, u8>>,
+        metadata_size: Option<usize>,
+        p: Option<u16>,
+        v: Option<String>,
+    ) -> Self {
+        Self {
+            m,
+            metadata_size,
+            p,
+            v,
+        }
     }
 }
 /// Converts a byte stream into a [`ExtendedMessageHandshakeDict`].
@@ -681,13 +694,22 @@ impl TryFrom<Vec<u8>> for ExtendedMessageHandshakeDict {
             None => None,
         };
 
+        let metadata_size = val
+            .get("metadata_size")
+            .map(|ms| ms.as_u64().unwrap_or_default() as usize);
+
         let p = val.get("p").map(|p| p.as_u64().unwrap_or_default() as u16);
 
         let v = val
             .get("v")
             .map(|v| v.as_str().unwrap_or_default().to_string());
 
-        Ok(Self { m, p, v })
+        Ok(Self {
+            m,
+            metadata_size,
+            p,
+            v,
+        })
     }
 }
 

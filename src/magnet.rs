@@ -77,8 +77,8 @@
 //! - Peer 3: `139.59.184.255:51548`
 
 use crate::constants::{
-    HashType, CLIENT_NAME, COMPACT, DOWNLOADED, PEER_ID, PORT, SHA1_LEN, UPLOADED, UT_METADATA,
-    UT_METADATA_ID,
+    HashType, BLOCK_SIZE, CLIENT_NAME, COMPACT, DOWNLOADED, PEER_ID, PORT, SHA1_LEN, UPLOADED,
+    UT_METADATA, UT_METADATA_ID,
 };
 use crate::errors::{MagnetError, PeerError};
 use crate::magnet::magnet_link::MagnetLink;
@@ -162,6 +162,7 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
         // -> Send the extension handshake message
         let ext_hs_dict = ExtendedMessageHandshakeDict::new(
             Some(HashMap::from([(UT_METADATA.to_string(), UT_METADATA_ID)])),
+            None,
             Some(PORT),
             Some(CLIENT_NAME.to_string()),
         );
@@ -206,13 +207,9 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             "<= m = {:?}",
             dict.m.clone().expect("Expected field \"m\".")
         ); // todo rem
-        if let Some(m) = dict.m {
-            if let Some(&ut_metadata) = m.get(UT_METADATA) {
-                peer.extension_id = Some(ut_metadata);
-            }
-        };
+        peer.set_extension_dict(dict);
         // trace!("peer = {:?}", peer);
-        trace!("peer.extension_id = {:?}", peer.extension_id);
+        trace!("peer.extension_dict = {:?}", peer.get_extension_dict());
     }
     // Note that the extension handshake message is only sent if the other peer supports extensions
     // (indicated by the reserved bit in the base handshake).
@@ -226,24 +223,31 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
 /// ```shell
 /// $ ./your_bittorrent.sh magnet_info "<magnet-link>"
 /// ```
-pub async fn magnet_info(magnet_link: &str) -> Result<(), MagnetError> {
+pub async fn request_magnet_info(magnet_link: &str) -> Result<(), MagnetError> {
     // <=> Perform the extension handshake and get the peer
     let mut peer = magnet_handshake(magnet_link).await?;
 
-    // -> Send the metadata request message
-    let piece_index: usize = 0;
-    let payload = ExtensionRequestPayload::new(
-        ExtendedMessageId::Custom(peer.extension_id.ok_or(peer.addr)?),
-        piece_index,
-    )?;
-    let msg = Message::new(MessageId::Extended, Some(payload.into()));
-    debug!("-> msg = {msg}");
-    peer.feed(msg)
-        .await
-        .context("Feed the metadata request message")?;
-    peer.flush()
-        .await
-        .context("Flush the metadata request message")?;
+    let extension_id = peer.get_extension_id()?;
+    let metadata_size = peer.get_metadata_size()?;
+    let num_pcs = metadata_size.div_ceil(BLOCK_SIZE);
+
+    // The metadata is handled in blocks of 16 KiB (16384 Bytes). The metadata blocks are indexed starting at 0.
+    // All blocks are 16 KiB except the last block which may be smaller.
+    for piece_index in 0..num_pcs {
+        // -> Send the metadata request message
+        let payload =
+            ExtensionRequestPayload::new(ExtendedMessageId::Custom(extension_id), piece_index)?;
+        let msg = Message::new(MessageId::Extended, Some(payload.into()));
+        debug!("-> msg = {msg}");
+        peer.feed(msg)
+            .await
+            .context("Feed the metadata request message")?;
+        peer.flush()
+            .await
+            .context("Flush the metadata request message")?;
+
+        // <= Receive the metadata data message
+    }
 
     Ok(())
 }

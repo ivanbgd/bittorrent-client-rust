@@ -45,7 +45,7 @@ use crate::pieces::Pieces;
 /// # Errors
 /// This function returns an error in case it can't read the provided torrent file, or if it can't
 /// deserialize a bencode byte vector, or if it can't calculate hash of the `Info` dictionary.
-pub fn meta_info(torrent: &PathBuf) -> Result<MetaInfo, MetaInfoError> {
+pub fn read_meta_info(torrent: &PathBuf) -> Result<MetaInfo, MetaInfoError> {
     log::trace!("Reading meta info.");
     let contents = fs::read(torrent)?;
 
@@ -253,7 +253,10 @@ mod tests {
             e876f67a2a8886e8f36b136726c30fa29703022d\n\
             6e2275e604a0766656736e81ff10b55204ad8d35\n\
             f00d937a0213df1982bc8d097227ad9e909acc17\n",
-            format!("{}", meta_info(&PathBuf::from("sample.torrent")).unwrap())
+            format!(
+                "{}",
+                read_meta_info(&PathBuf::from("sample.torrent")).unwrap()
+            )
         );
     }
 
@@ -277,7 +280,7 @@ mod tests {
             3d8db9e34db63b4ba1be27930911aa37b3f997dd\n",
             format!(
                 "{}",
-                meta_info(&PathBuf::from("test_samples/codercat.gif.torrent")).unwrap()
+                read_meta_info(&PathBuf::from("test_samples/codercat.gif.torrent")).unwrap()
             )
         );
     }
@@ -294,7 +297,7 @@ mod tests {
             bded68d02de011a2b687f75b5833f46cce8e3e9c\n",
             format!(
                 "{}",
-                meta_info(&PathBuf::from("test_samples/congratulations.gif.torrent")).unwrap()
+                read_meta_info(&PathBuf::from("test_samples/congratulations.gif.torrent")).unwrap()
             )
         );
     }
@@ -317,7 +320,7 @@ mod tests {
             7affc94f0985b985eb888a36ec92652821a21be4\n",
             format!(
                 "{}",
-                meta_info(&PathBuf::from("test_samples/itsworking.gif.torrent")).unwrap()
+                read_meta_info(&PathBuf::from("test_samples/itsworking.gif.torrent")).unwrap()
             )
         );
     }

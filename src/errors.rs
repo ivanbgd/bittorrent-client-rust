@@ -179,6 +179,9 @@ pub enum PeerError {
     #[error("Wrong extended message ID: {0}, expected {1}")]
     WrongExtendedMessageId(ExtendedMessageId, ExtendedMessageId),
 
+    #[error("Peer's {addr} extension field \"{field}\" not set.")]
+    PeerExtensionFieldNotSet { addr: SocketAddrV4, field: String },
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -205,6 +208,15 @@ impl From<(MessageId, MessageId)> for PeerError {
 impl From<MessageCodecError> for PeerError {
     fn from(value: MessageCodecError) -> Self {
         PeerError::FrameLengthError(value)
+    }
+}
+
+impl From<(SocketAddrV4, String)> for PeerError {
+    fn from(value: (SocketAddrV4, String)) -> Self {
+        PeerError::PeerExtensionFieldNotSet {
+            addr: value.0,
+            field: value.1,
+        }
     }
 }
 
@@ -241,9 +253,6 @@ pub enum MagnetError {
     #[error(transparent)]
     MessageErr(#[from] MessageError),
 
-    #[error("Peer's {0} extension ID not set.")]
-    PeerExtensionIdNotSet(SocketAddrV4),
-
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -251,12 +260,6 @@ pub enum MagnetError {
 impl PartialEq for MagnetError {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
-    }
-}
-
-impl From<SocketAddrV4> for MagnetError {
-    fn from(value: SocketAddrV4) -> Self {
-        MagnetError::PeerExtensionIdNotSet(value)
     }
 }
 
