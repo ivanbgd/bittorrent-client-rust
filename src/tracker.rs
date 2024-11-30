@@ -12,13 +12,13 @@
 //! https://www.bittorrent.org/beps/bep_0023.html
 //! The assignment itself only supports the compact mode.
 //!
-//! `$ ./your_bittorrent.sh peers sample.torrent`
-//!
-//! `165.232.41.73:51556`
-//!
-//! `165.232.38.164:51532`
-//!
-//! `165.232.35.114:51437`
+//! # Example:
+//! ```shell
+//! $ ./your_bittorrent.sh peers sample.torrent
+//! 165.232.41.73:51556
+//! 165.232.38.164:51532
+//! 165.232.35.114:51437
+//! ```
 
 use std::path::PathBuf;
 

@@ -74,7 +74,11 @@ async fn main() -> Result<(), String> {
             println!("Peer Metadata Extension ID: {ext_id}");
         }
         Commands::MagnetInfo { magnet_link } => {
-            request_magnet_info(magnet_link).await?;
+            let ml = parse_magnet_link(magnet_link)?.to_string();
+            let display: String = ml.split_inclusive('\n').take(2).collect();
+            println!("{}", display);
+            let info = request_magnet_info(magnet_link).await?;
+            println!("{:?}", info);
         }
     }
 

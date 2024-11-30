@@ -31,7 +31,7 @@
 //! - https://en.wikipedia.org/wiki/Magnet_URI_scheme
 //! - [Extension Protocol](https://www.bittorrent.org/beps/bep_0010.html)
 //!
-//! ## Usage
+//! ## Usage Examples
 //!
 //! ### Parse Magnet Link
 //!
@@ -45,7 +45,7 @@
 //! $ ./your_bittorrent.sh magnet_parse "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce"
 //! ```
 //!
-//! Expected response:
+//! Example response:
 //! ```shell
 //! Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
 //! Info Hash: ad42ce8109f54c99613ce38f9b4d87e70f24a165
@@ -57,10 +57,28 @@
 //! $ ./your_bittorrent.sh magnet_handshake "<magnet-link>"
 //! ```
 //!
+//! Example response:
+//! ```shell
+//! Peer ID: 0102030405060708090a0b0c0d0e0f1011121314
+//! Peer Metadata Extension ID: 123
+//! ```
+//!
 //! ### Request & Receive Metadata
 //!
 //! ```shell
 //! $ ./your_bittorrent.sh magnet_info "<magnet-link>"
+//! ```
+//!
+//! Example response:
+//! ```shell
+//! Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
+//! Length: 92063
+//! Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
+//! Piece Length: 32768
+//! Piece Hashes:
+//! 6e2275e604a0766656736e81ff10b55204ad8d35
+//! e876f67a2a8886e8f36b136726c30fa29703022d
+//! f00d937a0213df1982bc8d097227ad9e909acc17
 //! ```
 //!
 //! ### Magnet Links for Local Testing
@@ -84,8 +102,9 @@ use crate::errors::{MagnetError, PeerError};
 use crate::magnet::magnet_link::MagnetLink;
 use crate::message::{
     ExtendedMessageHandshakeDict, ExtendedMessageHandshakePayload, ExtendedMessageId,
-    ExtensionRequestPayload, Message, MessageId,
+    ExtensionPayload, Message, MessageId,
 };
+use crate::meta_info::Info;
 use crate::peer::Peer;
 use crate::tracker::peers::Peers;
 use crate::tracker::{TrackerRequest, TrackerResponse};
@@ -196,8 +215,8 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             .expect("Expected to have received the extension handshake message")
             .try_into()?;
         eprintln!("<= payload = {payload}"); // todo rem
-        if payload.id != ExtendedMessageId::Handshake {
-            let err = PeerError::WrongExtendedMessageId(payload.id, ExtendedMessageId::Handshake);
+        if ExtendedMessageId::Handshake != payload.id {
+            let err = PeerError::WrongExtendedMessageId(ExtendedMessageId::Handshake, payload.id);
             warn!("Receive the extension handshake message: {err:#}");
             return Err(err.into());
         }
@@ -218,12 +237,12 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     Ok(peer)
 }
 
-/// Request torrent metadata from a peer using the metadata extension.
+/// Requests torrent metadata from a peer using the metadata extension and returns it.
 ///
 /// ```shell
 /// $ ./your_bittorrent.sh magnet_info "<magnet-link>"
 /// ```
-pub async fn request_magnet_info(magnet_link: &str) -> Result<(), MagnetError> {
+pub async fn request_magnet_info(magnet_link: &str) -> Result<Info, MagnetError> {
     // <=> Perform the extension handshake and get the peer
     let mut peer = magnet_handshake(magnet_link).await?;
 
@@ -231,12 +250,15 @@ pub async fn request_magnet_info(magnet_link: &str) -> Result<(), MagnetError> {
     let metadata_size = peer.get_metadata_size()?;
     let num_pcs = metadata_size.div_ceil(BLOCK_SIZE);
 
+    let mut contents: Vec<u8> = Vec::with_capacity(metadata_size);
+
+    // This extension only transfers the **info-dictionary** part of the .torrent file.
+    //
     // The metadata is handled in blocks of 16 KiB (16384 Bytes). The metadata blocks are indexed starting at 0.
     // All blocks are 16 KiB except the last block which may be smaller.
     for piece_index in 0..num_pcs {
         // -> Send the metadata request message
-        let payload =
-            ExtensionRequestPayload::new(ExtendedMessageId::Custom(extension_id), piece_index)?;
+        let payload = ExtensionPayload::new(ExtendedMessageId::Custom(extension_id), piece_index)?;
         let msg = Message::new(MessageId::Extended, Some(payload.into()));
         debug!("-> msg = {msg}");
         peer.feed(msg)
@@ -247,9 +269,37 @@ pub async fn request_magnet_info(magnet_link: &str) -> Result<(), MagnetError> {
             .context("Flush the metadata request message")?;
 
         // <= Receive the metadata data message
+        let msg = match peer.recv_msg().await {
+            Ok(msg) => msg,
+            Err(err) => {
+                warn!("Receive the metadata data message: {err:#}");
+                return Err(err.into());
+            }
+        };
+        debug!("<= msg = {msg}");
+        if msg.id != MessageId::Extended {
+            let err = PeerError::WrongMessageId(msg.id, MessageId::Extended);
+            warn!("Receive the metadata data message: {err:#}");
+            return Err(err.into());
+        }
+        let payload: ExtensionPayload = msg
+            .payload
+            .expect("Expected to have received the metadata data message")
+            .try_into()?;
+        eprintln!("<= payload = {payload}"); // todo rem
+                                             // The other peers should send our metadata ID in their responses.
+        if UT_METADATA_ID != <u8>::from(payload.id.clone()) {
+            let err = PeerError::WrongExtendedMessageId(UT_METADATA_ID.try_into()?, payload.id);
+            warn!("Receive the extension handshake message: {err:#}");
+            return Err(err.into());
+        }
+        contents.extend(payload.dict);
     }
 
-    Ok(())
+    let info: Info = serde_bencode::from_bytes(&contents)?;
+    eprintln!("<= info = {:?}", &info); // todo rem
+
+    Ok(info)
 }
 
 /// Fetches and returns the peers list.

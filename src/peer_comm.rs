@@ -8,7 +8,7 @@
 //!
 //! https://wiki.theory.org/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
 //!
-//! Usage:
+//! ### Example:
 //! ```shell
 //! $ ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>
 //! Peer ID: 0102030405060708090a0b0c0d0e0f1011121314
@@ -30,9 +30,13 @@
 //! Source (PDF): [BitTorrent Economics Paper](http://bittorrent.org/bittorrentecon.pdf)
 //! Also see: https://wiki.theory.org/BitTorrentSpecification#Queuing
 //!
-//! `$ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
+//! ### Examples:
+//! ```shell
+//! $ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>
+//! $ ./your_bittorrent.sh download -o /tmp/test-piece sample.torrent
+//! ```
 //!
-//! `$ ./your_bittorrent.sh download -o /tmp/test-piece sample.torrent`
+//! There is no expected output for these two commands.
 
 use std::cmp::min;
 use std::collections::{HashMap, VecDeque};

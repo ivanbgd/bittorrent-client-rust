@@ -6,23 +6,18 @@
 //!
 //! Currently, only the single-file torrents are supported.
 //!
-//! `$ ./your_bittorrent.sh info sample.torrent`
-//!
-//! `Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce`
-//!
-//! `Length: 92063`
-//!
-//! `Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f`
-//!
-//! `Piece Length: 32768`
-//!
-//! `Piece Hashes:`
-//!
-//! `e876f67a2a8886e8f36b136726c30fa29703022d`
-//!
-//! `6e2275e604a0766656736e81ff10b55204ad8d35`
-//!
-//! `f00d937a0213df1982bc8d097227ad9e909acc17`
+//! # Example:
+//! ```shell
+//! $ ./your_bittorrent.sh info sample.torrent
+//! Tracker URL: http://bittorrent-test-tracker.codecrafters.io/announce
+//! Length: 92063
+//! Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
+//! Piece Length: 32768
+//! Piece Hashes:
+//! e876f67a2a8886e8f36b136726c30fa29703022d
+//! 6e2275e604a0766656736e81ff10b55204ad8d35
+//! f00d937a0213df1982bc8d097227ad9e909acc17
+//! ```
 
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -87,7 +82,7 @@ impl MetaInfo {
     ///
     /// # Errors
     /// Serialization errors.
-    fn info_hash(&self) -> Result<HashType> {
+    pub(crate) fn info_hash(&self) -> Result<HashType> {
         let b_encoded_serialized = serde_bencode::to_bytes(&self.info)?;
         let hash: HashType = *Sha1::digest(b_encoded_serialized).as_ref();
         assert_eq!(hash.len(), SHA1_LEN);
@@ -104,7 +99,7 @@ impl MetaInfo {
     ///
     /// # Errors
     /// Serialization errors.
-    fn info_hash_hex(&self) -> Result<String> {
+    pub(crate) fn info_hash_hex(&self) -> Result<String> {
         let hash = self.info_hash()?;
         let hash = hex::encode(hash);
         assert_eq!(hash.len(), 2 * SHA1_LEN);
@@ -150,7 +145,7 @@ impl Display for MetaInfo {
 ///
 /// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
 ///
-/// Currently, only the single-file torrents are supported.
+/// Currently, only single-file torrents are supported.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Info {
     /// Single-file or multiple-file torrent

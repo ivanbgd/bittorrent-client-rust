@@ -176,7 +176,7 @@ pub enum PeerError {
     #[error("Wrong number of bytes written to file: expected {0}, got {1} bytes")]
     WrongWritten(usize, usize),
 
-    #[error("Wrong extended message ID: {0}, expected {1}")]
+    #[error("Wrong extended message ID: expected {0}, got {1}")]
     WrongExtendedMessageId(ExtendedMessageId, ExtendedMessageId),
 
     #[error("Peer's {addr} extension field \"{field}\" not set.")]
@@ -252,6 +252,9 @@ pub enum MagnetError {
 
     #[error(transparent)]
     MessageErr(#[from] MessageError),
+
+    #[error(transparent)]
+    MessageIdErr(#[from] MessageIdError),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
