@@ -21,14 +21,17 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-use crate::bencode::decode_bencoded_value;
-use crate::constants::MAX_FRAME_SIZE;
-use crate::errors::{MessageCodecError, MessageError, MessageIdError, PiecePayloadError};
 use anyhow::{Context, Result};
 use bytes::{Buf, BufMut, BytesMut};
 use log::trace;
-use serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_repr::*;
 use tokio_util::codec::{Decoder, Encoder};
+
+use crate::bencode::decode_bencoded_value;
+use crate::constants::MAX_FRAME_SIZE;
+use crate::errors::{MessageCodecError, MessageError, MessageIdError, PiecePayloadError};
+use crate::meta_info::Info;
 
 /// Message types
 ///
@@ -498,7 +501,7 @@ impl Encoder<Message> for MessageCodec {
 /// If the ID is `0`, the message is a handshake message.
 ///
 /// See: https://www.bittorrent.org/beps/bep_0010.html
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[repr(u8)]
 pub enum ExtendedMessageId {
     /// Extension handshake message
@@ -558,7 +561,7 @@ impl Display for ExtendedMessageHandshakePayload {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{{ id: {:?}, dict: {:?} }}",
+            "{{ id: {:?}, payload: {:?} }}",
             self.id,
             String::from_utf8_lossy(&self.dict)
         )
@@ -718,7 +721,8 @@ impl TryFrom<Vec<u8>> for ExtendedMessageHandshakeDict {
 /// Used for transferring of the info-dictionary part of the .torrent file, referred to as the metadata.
 ///
 /// See: https://www.bittorrent.org/beps/bep_0009.html#extension-message
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[repr(u8)]
 pub enum ExtensionMessageId {
     /// Requests a piece of metadata from the peer
     Request = 0,
@@ -733,6 +737,15 @@ pub enum ExtensionMessageId {
     Unsupported,
 }
 
+/// In case we'd like to print [`ExtensionMessageId`] as raw byte, i.e., as [`u8`].
+///
+/// Use [`Debug`] for human-readable output, which we derived for this enum.
+impl Display for ExtensionMessageId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self as *const Self as u8)
+    }
+}
+
 impl From<ExtensionMessageId> for u8 {
     fn from(value: ExtensionMessageId) -> u8 {
         value as u8
@@ -742,6 +755,19 @@ impl From<ExtensionMessageId> for u8 {
 impl From<ExtensionMessageId> for usize {
     fn from(value: ExtensionMessageId) -> usize {
         value as usize
+    }
+}
+
+impl TryFrom<u8> for ExtensionMessageId {
+    type Error = MessageIdError;
+
+    fn try_from(value: u8) -> Result<ExtensionMessageId, MessageIdError> {
+        match value {
+            0 => Ok(ExtensionMessageId::Request),
+            1 => Ok(ExtensionMessageId::Data),
+            2 => Ok(ExtensionMessageId::Reject),
+            v => Err(MessageIdError::UnsupportedId(v)),
+        }
     }
 }
 
@@ -759,21 +785,28 @@ impl From<ExtensionMessageId> for usize {
 ///     - `msg_type` is `0` for a request message, `1` for a data message, and `2` for a reject message.
 ///     - `piece` is the zero-based piece index of the metadata being requested.
 ///     - `total_size` is the length of the metadata piece (optional; contained only in the data messages).
+///  - Metadata piece contents (variable size), in case of a data message only.
 ///
 /// See: https://www.bittorrent.org/beps/bep_0009.html#extension-message
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ExtensionPayload {
     pub id: ExtendedMessageId,
-    pub dict: Vec<u8>,
+    dict: ExtensionMessage,
+    pub info: Option<Info>,
 }
 
 impl Display for ExtensionPayload {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let info = if let Some(info) = &self.info {
+            info.to_string()
+        } else {
+            "None".to_string()
+        };
+
         write!(
             f,
-            "{{ id: {:?}, dict: {:?} }}",
-            self.id,
-            String::from_utf8_lossy(&self.dict)
+            "{{999999 id: {:?}, dict: {}, info: {} }}",
+            self.id, self.dict, info
         )
     }
 }
@@ -781,46 +814,87 @@ impl Display for ExtensionPayload {
 impl ExtensionPayload {
     /// Creates a new extension request payload consisting of the peer's extension id and piece index.
     ///
-    /// This is meant only for creating requests,
-    /// because message type is internally fixed to [`ExtensionMessageId::Request`].
+    /// This is meant only for creating requests, because message type is fixed
+    /// to [`ExtensionMessageId::Request`] internally.
     ///
     /// Serializes `dict` into a bencode byte vector and stores it as such.
-    pub fn new(id: ExtendedMessageId, piece_index: usize) -> Result<Self, MessageError> {
-        let dict = HashMap::from([
-            ("msg_type".to_string(), ExtensionMessageId::Request.into()),
-            ("piece".to_string(), piece_index),
-        ]);
-        let dict = serde_bencode::to_bytes(&dict)?;
+    pub fn new_request(id: ExtendedMessageId, piece_index: u32) -> Result<Self, MessageError> {
+        let dict = ExtensionMessage {
+            msg_type: ExtensionMessageId::Request,
+            piece: piece_index,
+            total_size: None,
+        };
 
-        Ok(Self { id, dict })
+        Ok(Self {
+            id,
+            dict,
+            info: None,
+        })
     }
 }
 
-/// Converts a [`ExtensionPayload`] into a byte stream.
-impl From<ExtensionPayload> for Vec<u8> {
-    /// Serializes a [`ExtensionPayload`] for a send transfer over the wire.
-    fn from(value: ExtensionPayload) -> Self {
+/// Converts an [`ExtensionPayload`] into a byte stream.
+///
+/// Currently only supports sending requests.
+impl TryFrom<ExtensionPayload> for Vec<u8> {
+    type Error = MessageError;
+
+    /// Serializes an [`ExtensionPayload`] for a send transfer over the wire.
+    ///
+    /// Currently only supports sending requests.
+    fn try_from(value: ExtensionPayload) -> Result<Vec<u8>, MessageError> {
         let id = value.id.into();
-        let dict = value.dict;
+        let dict = serde_bencode::to_bytes(&value.dict)?;
 
         let mut buf: Vec<u8> = Vec::with_capacity(1 + dict.len());
 
         buf.push(id);
         buf.extend(dict);
 
-        buf
+        Ok(buf)
     }
 }
 
-/// Converts a byte stream into a [`ExtensionPayload`].
-impl TryFrom<Vec<u8>> for ExtensionPayload {
+/// Extension message - part of [`ExtensionPayload`]
+///
+/// It was designed to be used in both ways: for requesting and getting metadata from a peer.
+///
+/// The Extension message is structured as follows:
+/// - `{'msg_type': 0, 'piece': 0}` or `{'msg_type': 1, 'piece': 0, 'total_size': 3425}`
+///    or `{'msg_type': 2, 'piece': 0}` (encoded as a bencoded dictionary).
+/// - `msg_type` is `0` for a request message, `1` for a data message, and `2` for a reject message.
+/// - `piece` is the zero-based piece index of the metadata being requested.
+/// - `total_size` is the length of the metadata piece (optional; contained only in the data messages).
+///
+/// It is meant to be bencoded for a wire transfer.
+///
+/// See: https://www.bittorrent.org/beps/bep_0009.html#extension-message
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ExtensionMessage {
+    pub(crate) msg_type: ExtensionMessageId,
+    piece: u32,
+    total_size: Option<u32>,
+}
+
+impl Display for ExtensionMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ msg_type: {:?}, piece: {}, total_size: {:?} }}",
+            self.msg_type, self.piece, self.total_size
+        )
+    }
+}
+
+/// Converts a bencoded byte stream into an [`ExtensionMessage`].
+impl TryFrom<&[u8]> for ExtensionMessage {
     type Error = MessageError;
 
-    /// Deserializes a byte stream received from a wire transfer into [`ExtensionPayload`].
-    fn try_from(value: Vec<u8>) -> Result<ExtensionPayload, MessageError> {
-        let id = value[0].try_into()?;
-        let dict = value[1..].to_vec();
+    /// Deserializes a bencoded byte stream received from a wire transfer into [`ExtensionMessage`].
+    fn try_from(value: &[u8]) -> Result<ExtensionMessage, MessageError> {
+        let dict = decode_bencoded_value(value)?;
+        let dict: ExtensionMessage = serde_json::from_value(dict)?;
 
-        Ok(ExtensionPayload { id, dict })
+        Ok(dict)
     }
 }

@@ -41,5 +41,6 @@ env_logger = "0.11.5"
 futures-util = { version = "0.3.31", features = ["sink"] }
 log = "0.4.20"
 rand = "0.8.5"
+serde_repr = "0.1.19"
 tokio-util = { version = "0.7.12", features = ["full"] }
 urlencoding = "2.1.3"

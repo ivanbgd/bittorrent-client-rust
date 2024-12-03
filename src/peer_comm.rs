@@ -704,7 +704,7 @@ async fn local_get_peers(
                 continue;
             }
         };
-        trace!("00 Handshake with peer_idx {peer_idx}: {}", peer.addr);
+        trace!("00 hs Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
         // -> Send a Bitfield message
         // This can be safely ignored in this challenge, but we're doing it anyway.
@@ -725,9 +725,9 @@ async fn local_get_peers(
                 continue;
             }
         };
-        trace!("01 peer_idx {peer_idx}: {msg}");
-        if msg.id != MessageId::Bitfield {
-            let err = PeerError::WrongMessageId(msg.id, MessageId::Bitfield);
+        trace!("01 hs peer_idx {peer_idx}: {msg}");
+        if MessageId::Bitfield != msg.id {
+            let err = PeerError::WrongMessageId(MessageId::Bitfield, msg.id);
             warn!("Receive a Bitfield message: {err:#}");
             continue;
         }
@@ -752,7 +752,7 @@ async fn local_get_peers(
                 continue;
             }
         };
-        trace!("02 peer_idx {peer_idx}: {msg}");
+        trace!("02 hs peer_idx {peer_idx}: {msg}");
         if msg.id != MessageId::Unchoke {
             let err = PeerError::from((msg.id, MessageId::Unchoke));
             warn!("Receive an Unchoke message: {err:#}");

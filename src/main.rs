@@ -78,7 +78,7 @@ async fn main() -> Result<(), String> {
             let display: String = ml.split_inclusive('\n').take(2).collect();
             println!("{}", display);
             let info = request_magnet_info(magnet_link).await?;
-            println!("{:?}", info);
+            println!("{}", info);
         }
     }
 

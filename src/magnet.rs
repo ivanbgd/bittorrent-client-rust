@@ -102,7 +102,7 @@ use crate::errors::{MagnetError, PeerError};
 use crate::magnet::magnet_link::MagnetLink;
 use crate::message::{
     ExtendedMessageHandshakeDict, ExtendedMessageHandshakePayload, ExtendedMessageId,
-    ExtensionPayload, Message, MessageId,
+    ExtensionMessage, ExtensionMessageId, ExtensionPayload, Message, MessageId,
 };
 use crate::meta_info::Info;
 use crate::peer::Peer;
@@ -112,6 +112,7 @@ use anyhow::{Context, Result};
 use log::{debug, trace, warn};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
+use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 
 /// Parses a given magnet link.
@@ -205,8 +206,8 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             }
         };
         debug!("<= msg = {msg}");
-        if msg.id != MessageId::Extended {
-            let err = PeerError::WrongMessageId(msg.id, MessageId::Extended);
+        if MessageId::Extended != msg.id {
+            let err = PeerError::WrongMessageId(MessageId::Extended, msg.id);
             warn!("Receive the extension handshake message: {err:#}");
             return Err(err.into());
         }
@@ -214,20 +215,15 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             .payload
             .expect("Expected to have received the extension handshake message")
             .try_into()?;
-        eprintln!("<= payload = {payload}"); // todo rem
         if ExtendedMessageId::Handshake != payload.id {
             let err = PeerError::WrongExtendedMessageId(ExtendedMessageId::Handshake, payload.id);
             warn!("Receive the extension handshake message: {err:#}");
             return Err(err.into());
         }
         let dict: ExtendedMessageHandshakeDict = payload.dict.try_into()?;
-        trace!("<= payload.dict = {}", dict);
-        eprintln!(
-            "<= m = {:?}",
-            dict.m.clone().expect("Expected field \"m\".")
-        ); // todo rem
+        trace!("<= mhs payload.dict = {}", dict);
+
         peer.set_extension_dict(dict);
-        // trace!("peer = {:?}", peer);
         trace!("peer.extension_dict = {:?}", peer.get_extension_dict());
     }
     // Note that the extension handshake message is only sent if the other peer supports extensions
@@ -250,16 +246,17 @@ pub async fn request_magnet_info(magnet_link: &str) -> Result<Info, MagnetError>
     let metadata_size = peer.get_metadata_size()?;
     let num_pcs = metadata_size.div_ceil(BLOCK_SIZE);
 
-    let mut contents: Vec<u8> = Vec::with_capacity(metadata_size);
+    let mut metadata: Vec<u8> = Vec::with_capacity(metadata_size);
 
     // This extension only transfers the **info-dictionary** part of the .torrent file.
     //
     // The metadata is handled in blocks of 16 KiB (16384 Bytes). The metadata blocks are indexed starting at 0.
     // All blocks are 16 KiB except the last block which may be smaller.
-    for piece_index in 0..num_pcs {
+    for piece_index in 0..num_pcs as u32 {
         // -> Send the metadata request message
-        let payload = ExtensionPayload::new(ExtendedMessageId::Custom(extension_id), piece_index)?;
-        let msg = Message::new(MessageId::Extended, Some(payload.into()));
+        let payload =
+            ExtensionPayload::new_request(ExtendedMessageId::Custom(extension_id), piece_index)?;
+        let msg = Message::new(MessageId::Extended, Some(payload.try_into()?));
         debug!("-> msg = {msg}");
         peer.feed(msg)
             .await
@@ -272,32 +269,58 @@ pub async fn request_magnet_info(magnet_link: &str) -> Result<Info, MagnetError>
         let msg = match peer.recv_msg().await {
             Ok(msg) => msg,
             Err(err) => {
-                warn!("Receive the metadata data message: {err:#}");
+                warn!("Receive the metadata data or reject message: {err:#}");
                 return Err(err.into());
             }
         };
         debug!("<= msg = {msg}");
-        if msg.id != MessageId::Extended {
-            let err = PeerError::WrongMessageId(msg.id, MessageId::Extended);
-            warn!("Receive the metadata data message: {err:#}");
+        if MessageId::Extended != msg.id {
+            let err = PeerError::WrongMessageId(MessageId::Extended, msg.id);
+            warn!("Receive the metadata data or reject message: {err:#}");
             return Err(err.into());
         }
-        let payload: ExtensionPayload = msg
+
+        let payload = msg
             .payload
-            .expect("Expected to have received the metadata data message")
-            .try_into()?;
-        eprintln!("<= payload = {payload}"); // todo rem
-                                             // The other peers should send our metadata ID in their responses.
-        if UT_METADATA_ID != <u8>::from(payload.id.clone()) {
-            let err = PeerError::WrongExtendedMessageId(UT_METADATA_ID.try_into()?, payload.id);
-            warn!("Receive the extension handshake message: {err:#}");
+            .expect("Expected to have received the metadata data or reject message");
+        let (dict, info) = if piece_index == 0 {
+            payload.split_at(payload.len() - metadata_size)
+        } else {
+            payload.split_at(0)
+        };
+
+        // The other peers should send our metadata ID in their responses.
+        if UT_METADATA_ID != dict[0] {
+            let err =
+                PeerError::WrongExtendedMessageId(UT_METADATA_ID.try_into()?, dict[0].try_into()?);
+            warn!("Receive the metadata data or reject message: {err:#}");
             return Err(err.into());
         }
-        contents.extend(payload.dict);
+
+        // The first byte is reserved for ExtendedMessageId, so skip it.
+        let dict = &dict[1..];
+        let dict: ExtensionMessage = dict.try_into()?;
+        if dict.msg_type == ExtensionMessageId::Reject {
+            let err = MagnetError::Reject(peer.addr);
+            warn!("{err:#}");
+            return Err(err);
+        }
+
+        metadata.extend(info);
     }
 
-    let info: Info = serde_bencode::from_bytes(&contents)?;
-    eprintln!("<= info = {:?}", &info); // todo rem
+    let mut info: Info = serde_bencode::from_bytes(&metadata)?;
+    info.info_hash = *Sha1::digest(&metadata).as_ref();
+    info.info_hash_hex = hex::encode(info.info_hash);
+
+    // Validate hash
+    let hash_from_magnet_link = parse_magnet_link(magnet_link)?.xt;
+    let calculated_info_hash = &info.info_hash_hex;
+    if hash_from_magnet_link != *calculated_info_hash {
+        let err = MagnetError::HashMismatch(hash_from_magnet_link, calculated_info_hash.clone());
+        warn!("{err:#}");
+        return Err(err);
+    }
 
     Ok(info)
 }

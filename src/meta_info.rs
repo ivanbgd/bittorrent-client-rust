@@ -110,19 +110,10 @@ impl MetaInfo {
 impl Display for MetaInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let length = self.info.length();
-
-        let pieces = &self.info.pieces.0;
-        let hashes_len = pieces.len() * 2 * SHA1_LEN + pieces.len();
-        let mut piece_hashes = String::with_capacity(hashes_len);
-        for piece in pieces {
-            piece_hashes += &hex::encode(piece);
-            piece_hashes += "\n";
-        }
-
         write!(
             f,
             "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}",
-            self.announce, length, self.info.info_hash_hex, self.info.plen, piece_hashes
+            self.announce, length, self.info.info_hash_hex, self.info.plen, self.info.pieces
         )
     }
 }
@@ -146,7 +137,7 @@ impl Display for MetaInfo {
 /// https://wiki.theory.org/BitTorrentSpecification#Info_Dictionary
 ///
 /// Currently, only single-file torrents are supported.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Info {
     /// Single-file or multiple-file torrent
     #[serde(flatten)]
@@ -168,14 +159,36 @@ pub struct Info {
     /// Plain byte representation of the SHA1 sum of the Info dictionary, 20 bytes long
     ///
     /// This field is not a part of BitTorrent Specification, but we added it for easier use.
+    #[serde(with = "serde_bytes")]
     #[serde(skip)]
     pub info_hash: HashType,
 
     /// Hexadecimal string representation of the SHA1 sum of the Info dictionary, 40 bytes long
     ///
     /// This field is not a part of BitTorrent Specification, but we added it for easier use.
+    #[serde(with = "serde_bytes")]
     #[serde(skip)]
     pub info_hash_hex: String,
+}
+
+impl Display for Info {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // let info_hash = String::from_utf8_lossy(&self.info_hash);
+        //
+        // write!(
+        //     f,
+        //     "Info {{ mode: {:?}, plen: {}, pieces: {}, name: {}, info_hash: {}, info_hash_hex: {} }}",
+        //     self.mode, self.plen, self.pieces, self.name, info_hash, self.info_hash_hex
+        // )
+
+        writeln!(
+            f,
+            "Length: {}\nPiece Length: {}\nPiece Hashes:\n{}",
+            self.length(),
+            self.plen,
+            self.pieces
+        )
+    }
 }
 
 impl Info {
@@ -209,6 +222,12 @@ pub enum Mode {
     /// The files list is the value files maps to, and is a list of dictionaries containing the following keys:
     /// `path` and `length`.
     MultipleFile { files: Vec<File> },
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::SingleFile { length: 0 }
+    }
 }
 
 /// A list of dictionaries, one for each file

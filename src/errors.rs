@@ -8,7 +8,7 @@ use std::num::TryFromIntError;
 use std::string::FromUtf8Error;
 use thiserror::Error;
 
-use crate::message::{ExtendedMessageId, MessageId};
+use crate::message::{ExtendedMessageId, ExtensionMessageId, MessageId};
 
 /// Errors related to working with [`crate::meta_info`]
 #[derive(Debug, Error)]
@@ -136,7 +136,7 @@ pub enum PeerError {
     #[error("Tracker error: {0}")]
     TrackerError(#[from] TrackerError),
 
-    #[error("Wrong message ID: {0}, expected {1}")]
+    #[error("Wrong message ID: expected {0:?}, got {1:?}")]
     WrongMessageId(MessageId, MessageId),
 
     /// Used at the beginning, if we can't find any per to work with at all.
@@ -176,8 +176,11 @@ pub enum PeerError {
     #[error("Wrong number of bytes written to file: expected {0}, got {1} bytes")]
     WrongWritten(usize, usize),
 
-    #[error("Wrong extended message ID: expected {0}, got {1}")]
+    #[error("Wrong extended message ID: expected {0:?}, got {1:?}")]
     WrongExtendedMessageId(ExtendedMessageId, ExtendedMessageId),
+
+    #[error("Wrong extension message ID: expected {0:?}, got {1:?}")]
+    WrongExtensionMessageId(ExtensionMessageId, ExtensionMessageId),
 
     #[error("Peer's {addr} extension field \"{field}\" not set.")]
     PeerExtensionFieldNotSet { addr: SocketAddrV4, field: String },
@@ -230,6 +233,9 @@ impl From<PeerError> for String {
 #[derive(Debug, Error)]
 pub enum MagnetError {
     #[error(transparent)]
+    MessageErr(#[from] MessageError),
+
+    #[error(transparent)]
     PeerError(#[from] PeerError),
 
     #[error("Parsing magnet link {0}.")]
@@ -251,10 +257,13 @@ pub enum MagnetError {
     DeserializeError(#[from] serde_bencode::Error),
 
     #[error(transparent)]
-    MessageErr(#[from] MessageError),
-
-    #[error(transparent)]
     MessageIdErr(#[from] MessageIdError),
+
+    #[error("Reject message received from peer {0}")]
+    Reject(SocketAddrV4),
+
+    #[error("Hash mismatch: expected {0}, calculated {1}")]
+    HashMismatch(String, String),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),

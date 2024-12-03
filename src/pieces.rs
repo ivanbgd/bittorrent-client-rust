@@ -2,10 +2,10 @@
 //!
 //! Pieces are SHA1 hash values, and they are concatenated into a byte string in a torrent file.
 
-use std::fmt;
-
 use serde::de::{Deserialize, Deserializer, Error, Visitor};
 use serde::ser::{Serialize, Serializer};
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 
 use crate::constants::{HashType, SHA1_LEN};
 
@@ -16,8 +16,33 @@ use crate::constants::{HashType, SHA1_LEN};
 /// each of which is the SHA1 hash of the piece at the corresponding index.
 ///
 /// Implemented as vector of 20-byte arrays.
-#[derive(Debug, Clone)]
+#[derive(Clone, Default)]
 pub struct Pieces(pub Vec<HashType>);
+
+impl Debug for Pieces {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let pieces = self
+            .0
+            .iter()
+            .map(|h| String::from_utf8_lossy(h))
+            .collect::<Vec<_>>();
+
+        write!(f, "Pieces([{pieces:?}])")
+    }
+}
+
+impl Display for Pieces {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let pieces: String = self
+            .0
+            .iter()
+            .map(hex::encode)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        writeln!(f, "{pieces}")
+    }
+}
 
 struct PiecesVisitor;
 
