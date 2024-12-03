@@ -45,14 +45,6 @@ use std::net::SocketAddrV4;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::config::Config;
-use crate::constants::{HashType, BLOCK_SIZE, MAX_PIECE_SIZE};
-use crate::errors::PeerError;
-use crate::message::{Message, MessageId, PiecePayload, RequestPayload};
-use crate::meta_info::Info;
-use crate::peer::Peer;
-use crate::tracker::get_peers;
-
 use anyhow::{Context, Result};
 use log::{debug, info, trace, warn};
 use rand::seq::SliceRandom;
@@ -60,6 +52,17 @@ use rand::thread_rng;
 use sha1::{Digest, Sha1};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+use crate::config::Config;
+use crate::constants::{HashType, BLOCK_SIZE, MAX_PIECE_SIZE};
+use crate::errors::PeerError;
+use crate::magnet::request_magnet_info;
+use crate::message::{Message, MessageId, PiecePayload, RequestPayload};
+use crate::meta_info::Info;
+use crate::peer::Peer;
+use crate::tracker::get_peers;
+use crate::tracker::peers::Peers;
+use crate::MetadataSource;
 
 /// Sends a handshake to a single peer, and receives a handshake from the peer, in the same format.
 ///
@@ -119,7 +122,8 @@ pub async fn download_piece(
     torrent: &PathBuf,
     piece_index: usize,
 ) -> Result<(), PeerError> {
-    let work_params = get_work_params(torrent, Some(piece_index)).await?;
+    let work_params =
+        get_work_params(MetadataSource::TorrentFile(torrent), Some(piece_index)).await?;
 
     let WorkParams {
         mut peers,
@@ -201,7 +205,7 @@ pub async fn download(
 ) -> Result<(), PeerError> {
     let start = Instant::now();
 
-    let work_params = get_work_params(torrent, None).await?;
+    let work_params = get_work_params(MetadataSource::TorrentFile(torrent), None).await?;
     let WorkParams {
         mut peers,
         info,
@@ -332,20 +336,20 @@ pub async fn download(
 
 /// Parameters for the [`send_reqs`] & [`recv_piece`] functions.
 #[derive(Debug)]
-struct PieceParams<'a> {
-    num_pcs: usize,
-    piece_len: usize,
-    last_piece_len: usize,
-    block_len: usize,
-    num_blocks_per_piece: usize,
-    num_blocks_in_last_piece: usize,
-    last_block_len: usize,
-    total_num_blocks: usize,
-    piece_index: usize,
-    piece_hash: &'a HashType,
-    piece_offset: usize,
+pub(crate) struct PieceParams<'a> {
+    pub(crate) num_pcs: usize,
+    pub(crate) piece_len: usize,
+    pub(crate) last_piece_len: usize,
+    pub(crate) block_len: usize,
+    pub(crate) num_blocks_per_piece: usize,
+    pub(crate) num_blocks_in_last_piece: usize,
+    pub(crate) last_block_len: usize,
+    pub(crate) total_num_blocks: usize,
+    pub(crate) piece_index: usize,
+    pub(crate) piece_hash: &'a HashType,
+    pub(crate) piece_offset: usize,
     /// Here, `peer_idx` is used only for logging.
-    peer_idx: usize,
+    pub(crate) peer_idx: usize,
 }
 
 /// Sends a request for a single piece from a single peer.
@@ -366,7 +370,7 @@ struct PieceParams<'a> {
 /// # Errors
 /// - [`PeerError::TryFromIntError`], in case block offset cannot be calculated,
 /// - [`PeerError::Other`] wrapping another error, in case it can't send a [`MessageId::Request`] message to the peer.
-async fn send_reqs(
+pub(crate) async fn send_reqs(
     config: &Config,
     piece_params: &PieceParams<'_>,
     peer: &mut Peer,
@@ -480,7 +484,7 @@ async fn send_reqs(
 /// - [`PeerError::HashMismatch`], in case of bad hash value of the received piece,
 /// - [`PeerError::WrongWritten`], in case of wrong number of bytes written to file,
 /// - [`std::io::Error`], in case it can't write to file.
-async fn recv_piece(
+pub(crate) async fn recv_piece(
     config: &Config,
     piece_params: &PieceParams<'_>,
     peer: &mut Peer,
@@ -584,29 +588,38 @@ async fn recv_piece(
 }
 
 #[derive(Debug)]
-struct WorkParams {
-    peers: Vec<SocketAddrV4>,
-    info: Info,
-    piece_len: usize,
-    last_piece_len: usize,
-    block_len: usize,
-    num_blocks_per_piece: usize,
-    num_blocks_in_last_piece: usize,
-    last_block_len: usize,
-    total_num_blocks: usize,
+pub(crate) struct WorkParams {
+    pub(crate) peers: Vec<SocketAddrV4>,
+    pub(crate) info: Info,
+    pub(crate) piece_len: usize,
+    pub(crate) last_piece_len: usize,
+    pub(crate) block_len: usize,
+    pub(crate) num_blocks_per_piece: usize,
+    pub(crate) num_blocks_in_last_piece: usize,
+    pub(crate) last_block_len: usize,
+    pub(crate) total_num_blocks: usize,
 }
 
 /// Calculates and returns basic work parameters.
 ///
 /// # Errors
 /// - [`crate::errors::TrackerError`], in case it can't get the list of peers.
-async fn get_work_params(
-    torrent: &PathBuf,
+pub(crate) async fn get_work_params(
+    source: MetadataSource<'_>,
     piece_index: Option<usize>,
 ) -> Result<WorkParams, PeerError> {
-    // Perform the tracker GET request to get a list of peers.
-    let (peers, info) = get_peers(torrent).await?;
-    let peers = peers.0;
+    let (peers, info) = match source {
+        MetadataSource::TorrentFile(torrent) => {
+            // Perform the tracker GET request to get a list of peers.
+            let (peers, info) = get_peers(torrent).await?;
+            (peers.0, info)
+        }
+        MetadataSource::MagnetLink(magnet_link) => {
+            let (info, peer) = request_magnet_info(magnet_link).await.map_err(Box::new)?;
+            let peers = Peers(vec![peer.addr]);
+            (peers.0, info)
+        }
+    };
 
     // The file to download is split into pieces of same fixed length,
     // which is defined in torrent file and is a power of two,
@@ -753,8 +766,8 @@ async fn local_get_peers(
             }
         };
         trace!("02 hs peer_idx {peer_idx}: {msg}");
-        if msg.id != MessageId::Unchoke {
-            let err = PeerError::from((msg.id, MessageId::Unchoke));
+        if MessageId::Unchoke != msg.id {
+            let err = PeerError::from((MessageId::Unchoke, msg.id));
             warn!("Receive an Unchoke message: {err:#}");
             continue;
         }
@@ -779,7 +792,7 @@ async fn local_get_peers(
 ///
 /// # Errors
 /// - [`PeerError::WrongLen`], in case the sizes don't match.
-async fn check_file_size(
+pub(crate) async fn check_file_size(
     expected_len: usize,
     total_written: usize,
     path: &Path,
@@ -798,7 +811,7 @@ async fn check_file_size(
 ///
 /// # Errors
 /// - [`std::io::Result`], in case it can't open or read file.
-async fn calc_file_hash(path: &PathBuf) -> Result<String, PeerError> {
+pub(crate) async fn calc_file_hash(path: &PathBuf) -> Result<String, PeerError> {
     let mut file = File::open(path).await?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).await?;

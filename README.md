@@ -46,6 +46,7 @@ Note: This section is for stages 2 and beyond.
 - `./your_bittorrent.sh magnet_parse "<magnet-link>"`
 - `./your_bittorrent.sh magnet_handshake "<magnet-link>"`
 - `./your_bittorrent.sh magnet_info "<magnet-link>"`
+- `./your_bittorrent.sh magnet_download_piece -o <path_to_output_file> "<magnet-link>" <piece_index>`
 
 We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
 

@@ -81,6 +81,12 @@
 //! f00d937a0213df1982bc8d097227ad9e909acc17
 //! ```
 //!
+//! ### Download a Piece
+//!
+//! ```shell
+//! $ ./your_bittorrent.sh magnet_download_piece -o <path_to_output_file> "<magnet-link>" <piece_index>
+//! ```
+//!
 //! ### Magnet Links for Local Testing
 //!
 //! We can use [these magnet links](https://github.com/codecrafters-io/bittorrent-test-seeder/blob/main/torrent_files/magnet_links.txt)
@@ -94,6 +100,7 @@
 //! - Peer 2: `165.232.35.139:51459`
 //! - Peer 3: `139.59.184.255:51548`
 
+use crate::config::Config;
 use crate::constants::{
     HashType, BLOCK_SIZE, CLIENT_NAME, COMPACT, DOWNLOADED, PEER_ID, PORT, SHA1_LEN, UPLOADED,
     UT_METADATA, UT_METADATA_ID,
@@ -106,16 +113,23 @@ use crate::message::{
 };
 use crate::meta_info::Info;
 use crate::peer::Peer;
+use crate::peer_comm::{
+    check_file_size, get_work_params, recv_piece, send_reqs, PieceParams, WorkParams,
+};
 use crate::tracker::peers::Peers;
 use crate::tracker::{TrackerRequest, TrackerResponse};
+use crate::MetadataSource;
+
 use anyhow::{Context, Result};
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use tokio::fs::File;
 
-/// Parses a given magnet link.
+/// Parses the provided magnet link.
 ///
 /// ```shell
 /// $ ./your_bittorrent.sh magnet_parse "<magnet-link>"
@@ -126,7 +140,7 @@ pub fn parse_magnet_link(magnet_link: &str) -> Result<MagnetLink, MagnetError> {
     Ok(magnet_link)
 }
 
-/// Handshake with a peer and announce extension support.
+/// Handshake with a (randomly-chosen) peer and announce extension support.
 ///
 /// ```shell
 /// $ ./your_bittorrent.sh magnet_handshake "<magnet-link>"
@@ -140,12 +154,13 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     buf.copy_from_slice(&info_hash);
 
     // Perform the tracker GET request to get a list of peers.
-    let peers = get_peers(magnet_link.tr.as_deref(), urlenc_info_hash).await?;
+    let peers = magnet_get_peers(magnet_link.tr.as_deref(), urlenc_info_hash).await?;
 
     // Choose a peer randomly.
     let mut list = peers.0;
     list.shuffle(&mut thread_rng());
-    let mut peer = Peer::new(&list[0]);
+    let peer_idx = 0;
+    let mut peer = Peer::new(&list[peer_idx]);
 
     // <=> Establish a TCP connection with a peer, and perform a base handshake
     let supports_ext = match peer.base_handshake(&buf).await {
@@ -155,6 +170,7 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             return Err(MagnetError::from(err));
         }
     };
+    trace!("00 mhs Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
     // -> Send the bitfield message (safe to ignore in this challenge, so we are skipping this)
 
@@ -166,8 +182,9 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
             return Err(err.into());
         }
     };
-    if msg.id != MessageId::Bitfield {
-        let err = PeerError::from((msg.id, MessageId::Bitfield));
+    trace!("01 mhs peer_idx {peer_idx}: {msg}");
+    if MessageId::Bitfield != msg.id {
+        let err = PeerError::from((MessageId::Bitfield, msg.id));
         warn!("Receive a Bitfield message: {err:#}");
         return Err(err.into());
     }
@@ -230,15 +247,42 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     // (indicated by the reserved bit in the base handshake).
     // This is how backward compatibility is maintained with peers that don't support extensions.
 
+    // -> Send the Interested message
+    let msg = Message::new(MessageId::Interested, None);
+    peer.feed(msg)
+        .await
+        .context("Feed the Interested message")?;
+    peer.flush().await.context("Flush the Interested message")?;
+
+    // <= Receive an Unchoke message
+    let msg = match peer.recv_msg().await {
+        Ok(msg) => msg,
+        Err(err) => {
+            warn!("Receive an Unchoke message: {err:#}");
+            return Err(err.into());
+        }
+    };
+    trace!("02 mhs peer_idx {peer_idx}: {msg}");
+    if MessageId::Unchoke != msg.id {
+        let err = PeerError::from((MessageId::Unchoke, msg.id));
+        warn!("Receive an Unchoke message: {err:#}");
+        return Err(err.into());
+    }
+
+    debug!("Working with single peer: {}\n", peer.addr);
+
     Ok(peer)
 }
 
-/// Requests torrent metadata from a peer using the metadata extension and returns it.
+/// Requests torrent metadata from a peer using the metadata extension and
+/// returns it, together with the peer.
+///
+/// This assumes that it performs a magnet handshake with a (randomly-chosen) peer.
 ///
 /// ```shell
 /// $ ./your_bittorrent.sh magnet_info "<magnet-link>"
 /// ```
-pub async fn request_magnet_info(magnet_link: &str) -> Result<Info, MagnetError> {
+pub async fn request_magnet_info(magnet_link: &str) -> Result<(Info, Peer), MagnetError> {
     // <=> Perform the extension handshake and get the peer
     let mut peer = magnet_handshake(magnet_link).await?;
 
@@ -322,11 +366,107 @@ pub async fn request_magnet_info(magnet_link: &str) -> Result<Info, MagnetError>
         return Err(err);
     }
 
-    Ok(info)
+    Ok((info, peer))
+}
+
+/// Downloads a single piece of a file and stores it.
+///
+/// Arguments:
+/// - config: [`Config`], application configuration,
+/// - output: &[`PathBuf`], path to the output file for storing the downloaded piece
+/// - magnet_link: &[`str`], magnet link
+/// - piece_index: [`usize`], zero-based piece index
+///
+/// The last piece can be smaller than other pieces which are of same fixed size that
+/// is defined in the torrent file.
+///
+/// Pieces are split into blocks of 16 kB or potentially less in case of the very last block,
+/// and transferred as such. The blocks are assembled into a full piece when all of them
+/// have been received.
+///
+/// Works with a single (randomly-chosen) peer, but pipelines requests to it for increased download speed.
+///
+/// `$ ./your_bittorrent.sh magnet_download_piece -o /tmp/test-piece sample.torrent "<magnet-link>" <piece_index>`
+pub async fn magnet_download_piece(
+    config: Config,
+    output: &PathBuf,
+    magnet_link: &str,
+    piece_index: usize,
+) -> Result<(), MagnetError> {
+    let work_params =
+        get_work_params(MetadataSource::MagnetLink(magnet_link), Some(piece_index)).await?;
+
+    let WorkParams {
+        info,
+        piece_len,
+        last_piece_len,
+        block_len,
+        num_blocks_per_piece,
+        num_blocks_in_last_piece,
+        last_block_len,
+        total_num_blocks,
+        ..
+    } = work_params;
+
+    let num_pcs = info.pieces.0.len();
+
+    if piece_index >= num_pcs {
+        return Err(MagnetError::from(PeerError::WrongPieceIndex(
+            piece_index,
+            num_pcs,
+        )));
+    }
+
+    let peer_idx = 0;
+
+    // This is silly, but let's just do it for the sake of the challenge and its tests passing.
+    // The challenge had us develop functions in some order, that I'm now reusing, but I'd design
+    // this differently from the beginning if this entire repository weren't originally meant
+    // to be a solution for the challenge.
+    // So, let's handshake with some peer again!
+    // Namely, we choose a peer randomly, so it might not be the same peer as the one we used to fetch metadata,
+    // but that's not a problem, because all peers have the same metadata, because it's the same torrent.
+
+    // <=> Perform the extension handshake and get the peer
+    let peer = &mut magnet_handshake(magnet_link).await?;
+
+    let piece_hash = &info.pieces.0[piece_index];
+
+    let is_last_piece = piece_index == num_pcs - 1;
+    let mut current_piece_len = piece_len;
+    if is_last_piece {
+        current_piece_len = last_piece_len;
+    }
+
+    let piece_params = PieceParams {
+        num_pcs,
+        piece_len,
+        last_piece_len,
+        block_len,
+        num_blocks_per_piece,
+        num_blocks_in_last_piece,
+        last_block_len,
+        total_num_blocks,
+        piece_index,
+        piece_hash,
+        piece_offset: 0,
+        peer_idx,
+    };
+
+    let mut file = File::create(output).await?;
+
+    send_reqs(&config, &piece_params, peer).await?;
+    let written_total = recv_piece(&config, &piece_params, peer, &mut file).await?;
+
+    check_file_size(current_piece_len, written_total, output).await?;
+
+    info!("Success!");
+
+    Ok(())
 }
 
 /// Fetches and returns the peers list.
-async fn get_peers(tracker: Option<&str>, info_hash: String) -> Result<Peers, MagnetError> {
+async fn magnet_get_peers(tracker: Option<&str>, info_hash: String) -> Result<Peers, MagnetError> {
     let tracker = match tracker {
         Some(url) => url,
         None => return Err(MagnetError::TrackerMissing),

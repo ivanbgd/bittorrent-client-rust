@@ -130,6 +130,9 @@ impl From<std::io::Error> for MessageCodecError {
 /// Errors related to working with [`crate::peer::Peer`]
 #[derive(Debug, Error)]
 pub enum PeerError {
+    #[error(transparent)]
+    MagnetError(#[from] Box<MagnetError>),
+
     #[error("Handshake error: {0}")]
     HandshakeError(String),
 
@@ -264,6 +267,9 @@ pub enum MagnetError {
 
     #[error("Hash mismatch: expected {0}, calculated {1}")]
     HashMismatch(String, String),
+
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),

@@ -12,6 +12,7 @@
 //! - ./your_bittorrent.sh magnet_parse "<magnet-link>"
 //! - ./your_bittorrent.sh magnet_handshake "<magnet-link>"
 //! - ./your_bittorrent.sh magnet_info "<magnet-link>"
+//! - ./your_bittorrent.sh magnet_download_piece -o <path_to_output_file> "<magnet-link>" <piece_index>
 //! ```
 
 use anyhow::Result;
@@ -22,7 +23,9 @@ use bittorrent_starter_rust::bencode::decode_bencoded_value;
 use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::config::get_config;
 use bittorrent_starter_rust::errors::ae2s;
-use bittorrent_starter_rust::magnet::{magnet_handshake, parse_magnet_link, request_magnet_info};
+use bittorrent_starter_rust::magnet::{
+    magnet_download_piece, magnet_handshake, parse_magnet_link, request_magnet_info,
+};
 use bittorrent_starter_rust::meta_info::read_meta_info;
 use bittorrent_starter_rust::peer_comm::{download, download_piece, handshake};
 use bittorrent_starter_rust::tracker::get_peers;
@@ -77,8 +80,15 @@ async fn main() -> Result<(), String> {
             let ml = parse_magnet_link(magnet_link)?.to_string();
             let display: String = ml.split_inclusive('\n').take(2).collect();
             println!("{}", display);
-            let info = request_magnet_info(magnet_link).await?;
+            let info = request_magnet_info(magnet_link).await?.0;
             println!("{}", info);
+        }
+        Commands::MagnetDownloadPiece {
+            output,
+            magnet_link,
+            piece_index,
+        } => {
+            magnet_download_piece(config, output, magnet_link, *piece_index).await?;
         }
     }
 

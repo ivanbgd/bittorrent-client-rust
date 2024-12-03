@@ -85,4 +85,17 @@ pub enum Commands {
         /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>
         magnet_link: String,
     },
+
+    /// Download a piece through a magnet link and save it to disk
+    MagnetDownloadPiece {
+        /// Path to an output file for the piece
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// magnet:?xt=urn:btih:<info-hash>&dn=<name>&tr=<tracker-url>
+        magnet_link: String,
+
+        /// Zero-based piece index
+        piece_index: usize,
+    },
 }
