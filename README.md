@@ -36,6 +36,8 @@ Note: This section is for stages 2 and beyond.
 
 # Running the Program
 
+Torrent files and magnet links are supported for downloading a single file.
+
 - `./your_bittorrent.sh decode <encoded_value>`
 - `./your_bittorrent.sh info <path_to_torrent_file>`
 - `./your_bittorrent.sh peers <path_to_torrent_file>`
@@ -47,8 +49,9 @@ Note: This section is for stages 2 and beyond.
 - `./your_bittorrent.sh magnet_handshake "<magnet-link>"`
 - `./your_bittorrent.sh magnet_info "<magnet-link>"`
 - `./your_bittorrent.sh magnet_download_piece -o <path_to_output_file> "<magnet-link>" <piece_index>`
+- `./your_bittorrent.sh magnet_download -o <path_to_output_file> "<magnet-link>"`
 
-We can alternatively run it by `cargo run`, instead of `./your_bittorrent.sh`.
+We can alternatively run it by `cargo run --release`, instead of `./your_bittorrent.sh`.
 
 To enable the provided logging facility, first set the logging level by setting the `RUST_LOG` environment variable.  
 To set it for the entire terminal session, execute `export RUST_LOG=debug`, for example, first.  

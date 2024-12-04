@@ -13,6 +13,7 @@
 //! - ./your_bittorrent.sh magnet_handshake "<magnet-link>"
 //! - ./your_bittorrent.sh magnet_info "<magnet-link>"
 //! - ./your_bittorrent.sh magnet_download_piece -o <path_to_output_file> "<magnet-link>" <piece_index>
+//! - ./your_bittorrent.sh magnet_download -o <path_to_output_file> "<magnet-link>"
 //! ```
 
 use anyhow::Result;
@@ -24,7 +25,8 @@ use bittorrent_starter_rust::cli::{Args, Commands};
 use bittorrent_starter_rust::config::get_config;
 use bittorrent_starter_rust::errors::ae2s;
 use bittorrent_starter_rust::magnet::{
-    magnet_download_piece, magnet_handshake, parse_magnet_link, request_magnet_info,
+    magnet_download, magnet_download_piece, magnet_handshake, parse_magnet_link,
+    request_magnet_info,
 };
 use bittorrent_starter_rust::meta_info::read_meta_info;
 use bittorrent_starter_rust::peer_comm::{download, download_piece, handshake};
@@ -89,6 +91,12 @@ async fn main() -> Result<(), String> {
             piece_index,
         } => {
             magnet_download_piece(config, output, magnet_link, *piece_index).await?;
+        }
+        Commands::MagnetDownload {
+            output,
+            magnet_link,
+        } => {
+            magnet_download(config, output, magnet_link).await?;
         }
     }
 

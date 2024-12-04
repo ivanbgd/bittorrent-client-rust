@@ -225,7 +225,7 @@ pub async fn download(
     let mut work_peers: Vec<Peer> =
         local_get_peers(&mut peers, &info, config.max_num_peers).await?;
 
-    // All piece hashes from the torrent file
+    // All piece hashes from the Info dictionary
     let mut missing_pieces = VecDeque::from_iter(info.pieces.0.iter().enumerate());
 
     // Maps piece_index (key) to peer_idx (value), for successfully sent requests.
