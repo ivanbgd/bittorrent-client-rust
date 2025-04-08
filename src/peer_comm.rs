@@ -10,13 +10,13 @@
 //!
 //! ### Example:
 //! ```shell
-//! $ ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>
+//! $ ./run.sh handshake sample.torrent <peer_ip>:<peer_port>
 //! Peer ID: 0102030405060708090a0b0c0d0e0f1011121314
 //! ```
 //!
 //! Exact value will be different as it is randomly generated.
 //!
-//! *Note:* To get a peer IP & port to test this locally, run `./your_bittorrent.sh peers sample.torrent`
+//! *Note:* To get a peer IP & port to test this locally, run `./run.sh peers sample.torrent`
 //! and pick any peer from the list.
 //!
 //! ## Peer Messages
@@ -32,8 +32,8 @@
 //!
 //! ### Examples:
 //! ```shell
-//! $ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>
-//! $ ./your_bittorrent.sh download -o /tmp/test-piece sample.torrent
+//! $ ./run.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>
+//! $ ./run.sh download -o /tmp/test-piece sample.torrent
 //! ```
 //!
 //! There is no expected output for these two commands.
@@ -81,7 +81,7 @@ use crate::MetadataSource;
 ///
 /// The handshake is a required message and must be the first message transmitted by the client.
 ///
-/// `$ ./your_bittorrent.sh handshake sample.torrent <peer_ip>:<peer_port>`
+/// `$ ./run.sh handshake sample.torrent <peer_ip>:<peer_port>`
 ///
 /// `Peer ID: 0102030405060708090a0b0c0d0e0f1011121314`
 ///
@@ -110,7 +110,7 @@ pub async fn handshake(peer: &SocketAddrV4, info_hash: &HashType) -> Result<Peer
 ///
 /// Works with a single peer, but pipelines requests to it for increased download speed.
 ///
-/// `$ ./your_bittorrent.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
+/// `$ ./run.sh download_piece -o /tmp/test-piece sample.torrent <piece_index>`
 ///
 /// # Errors
 /// - [`std::io::Error`], in case it can't create the output file,
@@ -192,7 +192,7 @@ pub async fn download_piece(
 ///
 /// Supports working with multiple peers at once.
 ///
-/// `$ ./your_bittorrent.sh download -o /tmp/test.txt sample.torrent`
+/// `$ ./run.sh download -o /tmp/test.txt sample.torrent`
 ///
 /// # Errors
 /// - [`std::io::Error`], in case it can't create the output file,
@@ -720,7 +720,7 @@ async fn local_get_peers(
         trace!("00 hs Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
         // -> Send a Bitfield message
-        // This can be safely ignored in this challenge, but we're doing it anyway.
+        // This can be safely ignored in this project, but we're doing it anyway.
         // We are setting the Bitfield payload to all zeros, which means that we don't have any piece.
         // In reality, we'd set it to show which pieces we have.
         let payload: Vec<u8> = vec![0; info.pieces.0.len().div_ceil(8)];
@@ -824,7 +824,7 @@ pub(crate) async fn calc_file_hash(path: &PathBuf) -> Result<String, PeerError> 
 ///
 /// Returns `true` if it does, and `false` if it does not.
 ///
-/// The challenge doesn't require this as all their peers have all the required pieces.
+/// The project doesn't require this as all their peers have all the required pieces.
 ///
 /// The Bitfield message is variable length. The high bit in the first byte corresponds to piece index 0.
 /// Bits that are cleared indicated a missing piece, and set bits indicate a valid and available piece.

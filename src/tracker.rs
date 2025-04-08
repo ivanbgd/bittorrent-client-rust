@@ -14,7 +14,7 @@
 //!
 //! # Example:
 //! ```shell
-//! $ ./your_bittorrent.sh peers sample.torrent
+//! $ ./run.sh peers sample.torrent
 //! 165.232.41.73:51556
 //! 165.232.38.164:51532
 //! 165.232.35.114:51437
@@ -167,7 +167,7 @@ pub(crate) struct TrackerRequest {
 pub struct TrackerResponse {
     /// Interval in seconds that the client should wait between sending regular requests to the tracker.
     ///
-    /// We can ignore this field for the purposes of this challenge.
+    /// We can ignore this field for the purposes of this project.
     ///
     /// We are wrapping it in `Option<>` because sometimes their test server (tracker) doesn't send it.
     pub interval: Option<usize>,

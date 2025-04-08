@@ -23,7 +23,7 @@
 //! - We'll be using v1 of [magnet URI format](https://www.bittorrent.org/beps/bep_0009.html#magnet-uri-format).
 //!   v2 is not widely used yet.
 //! - `xt` (info hash) is the only required parameter, all others are optional.
-//! - A magnet link can contain multiple tracker URLs, but for the purposes of this challenge it'll only contain one.
+//! - A magnet link can contain multiple tracker URLs, but for the purposes of this project it'll only contain one.
 //!
 //! ## Additional Info
 //!
@@ -36,13 +36,13 @@
 //! ### Parse Magnet Link
 //!
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_parse "<magnet-link>"
+//! $ ./run.sh magnet_parse "<magnet-link>"
 //! ```
 //!
 //! #### Example
 //!
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_parse "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce"
+//! $ ./run.sh magnet_parse "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce"
 //! ```
 //!
 //! Example response:
@@ -54,7 +54,7 @@
 //! ### Announce Extension Support, Send & Receive Extension Handshake
 //!
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_handshake "<magnet-link>"
+//! $ ./run.sh magnet_handshake "<magnet-link>"
 //! ```
 //!
 //! Example response:
@@ -66,7 +66,7 @@
 //! ### Request & Receive Metadata
 //!
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_info "<magnet-link>"
+//! $ ./run.sh magnet_info "<magnet-link>"
 //! ```
 //!
 //! Example response:
@@ -84,13 +84,13 @@
 //! ### Download a Piece
 //!
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_download_piece -o <path_to_output_file> "<magnet-link>" <piece_index>
+//! $ ./run.sh magnet_download_piece -o <path_to_output_file> "<magnet-link>" <piece_index>
 //! ```
 //!
 //! ### Download the Whole File
 //!
 //! ```shell
-//! $ ./your_bittorrent.sh magnet_download -o <path_to_output_file> "<magnet-link>"
+//! $ ./run.sh magnet_download -o <path_to_output_file> "<magnet-link>"
 //! ```
 //!
 //! ### Magnet Links for Local Testing
@@ -140,7 +140,7 @@ use tokio::fs::File;
 /// Parses the provided magnet link.
 ///
 /// ```shell
-/// $ ./your_bittorrent.sh magnet_parse "<magnet-link>"
+/// $ ./run.sh magnet_parse "<magnet-link>"
 /// ```
 pub fn parse_magnet_link(magnet_link: &str) -> Result<MagnetLink, MagnetError> {
     let magnet_link: MagnetLink = magnet_link.try_into()?;
@@ -151,7 +151,7 @@ pub fn parse_magnet_link(magnet_link: &str) -> Result<MagnetLink, MagnetError> {
 /// Handshake with a (randomly-chosen) peer and announce extension support.
 ///
 /// ```shell
-/// $ ./your_bittorrent.sh magnet_handshake "<magnet-link>"
+/// $ ./run.sh magnet_handshake "<magnet-link>"
 /// ```
 pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     // Parse the magnet link to get the tracker URL.
@@ -180,7 +180,7 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
     };
     trace!("00 mhs Handshake with peer_idx {peer_idx}: {}", peer.addr);
 
-    // -> Send the bitfield message (safe to ignore in this challenge, so we are skipping this)
+    // -> Send the bitfield message (safe to ignore in this project, so we are skipping this)
 
     // <= Receive a Bitfield message
     let msg = match peer.recv_msg().await {
@@ -266,7 +266,7 @@ pub async fn magnet_handshake(magnet_link: &str) -> Result<Peer, MagnetError> {
 /// This assumes that it performs a magnet handshake with a (randomly-chosen) peer.
 ///
 /// ```shell
-/// $ ./your_bittorrent.sh magnet_info "<magnet-link>"
+/// $ ./run.sh magnet_info "<magnet-link>"
 /// ```
 pub async fn request_magnet_info(magnet_link: &str) -> Result<(Info, Peer), MagnetError> {
     // <=> Perform the extension handshake and get the peer
@@ -372,7 +372,7 @@ pub async fn request_magnet_info(magnet_link: &str) -> Result<(Info, Peer), Magn
 ///
 /// Works with a single (randomly-chosen) peer, but pipelines requests to it for increased download speed.
 ///
-/// `$ ./your_bittorrent.sh magnet_download_piece -o /tmp/test-piece sample.torrent "<magnet-link>" <piece_index>`
+/// `$ ./run.sh magnet_download_piece -o /tmp/test-piece sample.torrent "<magnet-link>" <piece_index>`
 pub async fn magnet_download_piece(
     config: Config,
     output: &PathBuf,
@@ -406,10 +406,10 @@ pub async fn magnet_download_piece(
     // `get_work_params()` has already chosen a peer randomly, and it's this one (the only one).
     let peer_idx = 0;
 
-    // This is not the best solution, but let's just do it for the sake of the challenge and its tests passing.
-    // The challenge had us develop functions in some order, that I'm now reusing, but I'd design
+    // This is not the best solution, but let's just do it for the sake of the project and its tests passing.
+    // The project had us develop functions in some order, that I'm now reusing, but I'd design
     // this differently from the beginning if this entire repository weren't originally meant
-    // to be a solution for the challenge.
+    // to be a solution for the project.
     // We also have to send the Interested message and receive an Unchoke message here, instead of in
     // `magnet_handshake()`, because in that case the previous tests would be failing, but it is what it is...
     // So, let's handshake with some peer again!
@@ -461,7 +461,7 @@ pub async fn magnet_download_piece(
 ///
 /// Works with a single (randomly-chosen) peer, but pipelines requests to it for increased download speed.
 ///
-/// `$ ./your_bittorrent.sh magnet_download -o /tmp/test-piece "<magnet-link>"`
+/// `$ ./run.sh magnet_download -o /tmp/test-piece "<magnet-link>"`
 pub async fn magnet_download(
     config: Config,
     output: &PathBuf,
@@ -484,7 +484,7 @@ pub async fn magnet_download(
 
     // `get_work_params()` has already chosen a peer randomly, and it's this one (the only one).
     let peer_idx = 0;
-    // We need to handshake again with a peer because design of the app was driven by the challenge and the order
+    // We need to handshake again with a peer because design of the app was driven by the project and the order
     // of steps in it, as explained above, in `magnet_download_piece()`.
     // I don't feel like I should redesign it now.
     let peer = &mut full_magnet_handshake(magnet_link, peer_idx).await?;
@@ -582,7 +582,7 @@ pub async fn magnet_download(
 
 /// Performs [`magnet_handshake()`], but also adds the ending sequence that's not present in [`magnet_handshake()`].
 ///
-/// It isn't present there because of the challenge and its automated test suite. Namely, if it were present there,
+/// It isn't present there because of the project and its automated test suite. Namely, if it were present there,
 /// the previous magnet tests would be failing.
 ///
 /// As [`magnet_handshake()`] chooses a peer randomly, this function will handshake with a new peer, too.

@@ -12,16 +12,16 @@
 //!
 //! ### Examples:
 //! ```shell
-//! $ ./your_bittorrent.sh decode 5:hello
+//! $ ./run.sh decode 5:hello
 //! hello
 //!
-//! $ ./your_bittorrent.sh decode i52e
+//! $ ./run.sh decode i52e
 //! 52
 //!
-//! $ ./your_bittorrent.sh decode l5:helloi52ee
+//! $ ./run.sh decode l5:helloi52ee
 //! ["hello",52]
 //!
-//! $ ./your_bittorrent.sh decode d3:foo3:bar5:helloi52ee
+//! $ ./run.sh decode d3:foo3:bar5:helloi52ee
 //! {"foo":"bar","hello":52}
 //! ```
 //!
